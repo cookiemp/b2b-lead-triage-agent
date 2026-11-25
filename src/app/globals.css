@@ -1,27 +1,26 @@
 @import "tailwindcss";
 
 :root {
-  --bg-canvas: #fafaf8;
-  --bg-surface: #ffffff;
-  --bg-subtle: #f4f3ef;
-  --border-subtle: #e7e5e0;
-  --border-strong: #d6d3cc;
-  --ink-primary: #171614;
-  --ink-secondary: #57534e;
-  --ink-muted: #78716c;
-  --status-success: #166534;
-  --status-warning: #b45309;
-  --status-danger: #991b1b;
+  --bg-app: #ffffff;
+  --bg-rail: #f8f8f9;
+  --bg-subtle: #f4f4f6;
+  --border-hairline: #e8e8ec;
+  --border-strong: #d4d4dc;
+  --ink-primary: #111113;
+  --ink-secondary: #52525b;
+  --ink-muted: #71717a;
+  --status-success: #059669;
+  --status-warning: #d97706;
+  --status-danger: #dc2626;
 }
 
 @theme inline {
-  --font-sans: var(--font-plus-jakarta-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-serif: var(--font-newsreader), ui-serif, Georgia, serif;
-  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, monospace;
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
 }
 
 body {
-  background-color: var(--bg-canvas);
+  background-color: var(--bg-app);
   color: var(--ink-primary);
   font-family: var(--font-sans);
   text-rendering: optimizeLegibility;
