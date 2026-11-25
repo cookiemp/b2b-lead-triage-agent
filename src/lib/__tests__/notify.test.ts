@@ -77,10 +77,9 @@ function makePipelineResponse(
 }
 
 describe("sendLeadAlert", () => {
-  it("returns disabled when webhookUrl is unset", async () => {
+  it("returns disabled when neither Resend nor webhookUrl is configured", async () => {
     const fetchFn = vi.fn<typeof fetch>();
     const outcome = await sendLeadAlert(makePipelineResponse("auto_routed"), {
-      webhookUrl: undefined,
       fetchFn,
     });
     expect(outcome).toEqual({ sent: false, reason: "disabled" });
@@ -93,7 +92,8 @@ describe("sendLeadAlert", () => {
     const spamOutcome = await sendLeadAlert(
       makePipelineResponse("auto_rejected"),
       {
-        webhookUrl: "https://discord.com/api/webhooks/123/abc",
+        resendApiKey: "re_test_123",
+        alertEmailTo: "ops@company.com",
         fetchFn,
       },
     );
@@ -102,7 +102,8 @@ describe("sendLeadAlert", () => {
     const dupOutcome = await sendLeadAlert(
       makePipelineResponse("auto_routed", true),
       {
-        webhookUrl: "https://discord.com/api/webhooks/123/abc",
+        resendApiKey: "re_test_123",
+        alertEmailTo: "ops@company.com",
         fetchFn,
       },
     );
@@ -110,30 +111,42 @@ describe("sendLeadAlert", () => {
     expect(fetchFn).not.toHaveBeenCalled();
   });
 
-  it("sends Discord embed payload for auto_routed and needs_human_review", async () => {
+  it("sends Resend email with Bearer auth for auto_routed and needs_human_review", async () => {
     const fetchFn = vi
       .fn<typeof fetch>()
-      .mockResolvedValue(new Response(null, { status: 204 }));
+      .mockResolvedValue(
+        new Response(JSON.stringify({ id: "email_123" }), { status: 200 }),
+      );
 
     const outcome = await sendLeadAlert(
       makePipelineResponse("needs_human_review"),
       {
-        webhookUrl: "https://discord.com/api/webhooks/123/abc",
+        resendApiKey: "re_test_key",
+        alertEmailTo: "ops@company.com",
         fetchFn,
       },
     );
 
-    expect(outcome).toEqual({ sent: true, provider: "discord" });
+    expect(outcome).toEqual({ sent: true, provider: "resend" });
     expect(fetchFn).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body)) as {
-      content: string;
-      embeds: Array<{ title: string; description: string }>;
+    const [url, init] = fetchFn.mock.calls[0] ?? [];
+    expect(url).toBe("https://api.resend.com/emails");
+    const headers = init?.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer re_test_key");
+    const body = JSON.parse(String(init?.body)) as {
+      from: string;
+      to: string[];
+      subject: string;
+      text: string;
+      html: string;
     };
-    expect(body.content).toContain("[Needs Review]");
-    expect(body.embeds[0]?.description).toContain("below_confidence_threshold");
+    expect(body.to).toEqual(["ops@company.com"]);
+    expect(body.subject).toContain("[Needs Review]");
+    expect(body.text).toContain("below_confidence_threshold");
+    expect(body.html).toContain("Open Operations Inbox");
   });
 
-  it("sends Slack text payload for Slack webhook URLs", async () => {
+  it("falls back to Slack/Discord webhook when Resend is not set", async () => {
     const fetchFn = vi
       .fn<typeof fetch>()
       .mockResolvedValue(new Response("ok", { status: 200 }));
@@ -144,13 +157,9 @@ describe("sendLeadAlert", () => {
     });
 
     expect(outcome).toEqual({ sent: true, provider: "slack" });
-    const body = JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body)) as {
-      text: string;
-    };
-    expect(body.text).toContain("[Auto-Routed]");
   });
 
-  it("swallows timeouts and HTTP 500 errors safely without throwing", async () => {
+  it("swallows timeouts and HTTP errors safely without throwing", async () => {
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const timeoutFetch = vi.fn<typeof fetch>().mockImplementation(
@@ -167,7 +176,8 @@ describe("sendLeadAlert", () => {
     const timeoutOutcome = await sendLeadAlert(
       makePipelineResponse("auto_routed"),
       {
-        webhookUrl: "https://hooks.slack.com/services/T00/B00/XXX",
+        resendApiKey: "re_test_key",
+        alertEmailTo: "ops@company.com",
         fetchFn: timeoutFetch,
         timeoutMs: 20,
       },
@@ -176,19 +186,20 @@ describe("sendLeadAlert", () => {
 
     const errorFetch = vi
       .fn<typeof fetch>()
-      .mockResolvedValue(new Response("Bad Gateway", { status: 502 }));
+      .mockResolvedValue(new Response("Unauthorized", { status: 401 }));
 
     const errorOutcome = await sendLeadAlert(
       makePipelineResponse("auto_routed"),
       {
-        webhookUrl: "https://hooks.slack.com/services/T00/B00/XXX",
+        resendApiKey: "re_bad_key",
+        alertEmailTo: "ops@company.com",
         fetchFn: errorFetch,
       },
     );
     expect(errorOutcome).toEqual({
       sent: false,
       reason: "http_error",
-      httpStatus: 502,
+      httpStatus: 401,
     });
 
     errSpy.mockRestore();
@@ -196,13 +207,13 @@ describe("sendLeadAlert", () => {
 });
 
 describe("workflows/n8n-triage-workflow.json integrity", () => {
-  it("is valid JSON wiring Webhook -> Triage API (X-Webhook-Secret) -> 3-way status switch", () => {
+  it("is valid JSON wiring Webhook -> Triage API (X-Webhook-Secret) -> 3-way Resend email switch", () => {
     const raw = readFileSync(
       path.resolve(process.cwd(), "workflows/n8n-triage-workflow.json"),
       "utf8",
     );
     const workflow = JSON.parse(raw) as {
-      nodes: Array<{ name: string; parameters?: Record<string, unknown> }>;
+      nodes: Array<{ name: string }>;
       connections: Record<string, unknown>;
     };
 
@@ -210,10 +221,11 @@ describe("workflows/n8n-triage-workflow.json integrity", () => {
     expect(nodeNames).toContain("Inbound Lead Webhook");
     expect(nodeNames).toContain("Call Triage API");
     expect(nodeNames).toContain("Route by Triage Status");
-    expect(nodeNames).toContain("Notify Sales Channel");
-    expect(nodeNames).toContain("Notify Human Review Queue");
+    expect(nodeNames).toContain("Email Sales Alert (Resend)");
+    expect(nodeNames).toContain("Email Review Alert (Resend)");
     expect(nodeNames).toContain("Silent Spam Archive");
     expect(raw).toContain("X-Webhook-Secret");
+    expect(raw).toContain("https://api.resend.com/emails");
     expect(raw).toContain("auto_rejected");
   });
 });

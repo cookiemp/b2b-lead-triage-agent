@@ -1,5 +1,5 @@
 {
-  "name": "B2B Inbound Lead Triage & Alert Orchestrator",
+  "name": "B2B Inbound Lead Triage & Email Alert Orchestrator",
   "nodes": [
     {
       "parameters": {
@@ -127,16 +127,29 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.ALERT_WEBHOOK_URL }}",
+        "url": "https://api.resend.com/emails",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.RESEND_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ content: `[Auto-Routed] ${$json.lead.name} (${$json.lead.email}) -> ${$json.lead.triage_json?.suggested_route ?? 'sales'} | ICP ${$json.lead.icp_score}/100 | Conf ${$json.lead.confidence_score}\\nDraft: ${$json.lead.draft_reply ?? ''}` }) }}",
+        "jsonBody": "={{ JSON.stringify({ from: 'Lead Triage <onboarding@resend.dev>', to: [$env.ALERT_EMAIL_TO], subject: `[Auto-Routed] ${$json.lead.name} (${$json.lead.email})`, text: `Qualified lead auto-routed via n8n.\\n\\nCompany: ${$json.lead.company_url}\\nRoute: ${$json.lead.triage_json?.suggested_route ?? 'sales'}\\nICP: ${$json.lead.icp_score}/100 | Confidence: ${$json.lead.confidence_score}\\n\\nDraft reply:\\n${$json.lead.draft_reply ?? ''}\\n\\nInbox: https://b2b-lead-triage-agent.vercel.app` }) }}",
         "options": {
-          "timeout": 5000
+          "timeout": 8000
         }
       },
-      "id": "b2b-alert-sales",
-      "name": "Notify Sales Channel",
+      "id": "b2b-email-sales",
+      "name": "Email Sales Alert (Resend)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [1040, 160]
@@ -144,16 +157,29 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.ALERT_WEBHOOK_URL }}",
+        "url": "https://api.resend.com/emails",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.RESEND_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ content: `[Needs Human Review] ${$json.lead.name} (${$json.lead.email}) | Reason: ${$json.routing_reason} | Conf ${$json.lead.confidence_score ?? 'n/a'}\\nReview queue: https://b2b-lead-triage-agent.vercel.app` }) }}",
+        "jsonBody": "={{ JSON.stringify({ from: 'Lead Triage <onboarding@resend.dev>', to: [$env.ALERT_EMAIL_TO], subject: `[Needs Review] ${$json.lead.name} (${$json.lead.email})`, text: `Inbound lead held for human approval.\\n\\nCompany: ${$json.lead.company_url}\\nReason: ${$json.routing_reason}\\nConfidence: ${$json.lead.confidence_score ?? 'n/a'}\\n\\nReview queue: https://b2b-lead-triage-agent.vercel.app` }) }}",
         "options": {
-          "timeout": 5000
+          "timeout": 8000
         }
       },
-      "id": "b2b-alert-review",
-      "name": "Notify Human Review Queue",
+      "id": "b2b-email-review",
+      "name": "Email Review Alert (Resend)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [1040, 300]
@@ -208,14 +234,14 @@
       "main": [
         [
           {
-            "node": "Notify Sales Channel",
+            "node": "Email Sales Alert (Resend)",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Notify Human Review Queue",
+            "node": "Email Review Alert (Resend)",
             "type": "main",
             "index": 0
           }
@@ -229,7 +255,7 @@
         ]
       ]
     },
-    "Notify Sales Channel": {
+    "Email Sales Alert (Resend)": {
       "main": [
         [
           {
@@ -240,7 +266,7 @@
         ]
       ]
     },
-    "Notify Human Review Queue": {
+    "Email Review Alert (Resend)": {
       "main": [
         [
           {

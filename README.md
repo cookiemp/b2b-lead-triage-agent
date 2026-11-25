@@ -134,14 +134,15 @@ npm run dev
 To run this agent inside an n8n workflow without moving deterministic business logic out of tested TypeScript:
 
 1. Import [`workflows/n8n-triage-workflow.json`](./workflows/n8n-triage-workflow.json) into n8n (n8n Cloud or self-hosted).
-2. Set two n8n environment variables:
+2. Set three n8n environment variables:
    - `TRIAGE_WEBHOOK_SECRET`: must match `WEBHOOK_SECRET` in Vercel.
-   - `ALERT_WEBHOOK_URL`: your Discord or Slack incoming webhook URL.
+   - `RESEND_API_KEY`: your Resend API key (Sending access).
+   - `ALERT_EMAIL_TO`: destination email address for alerts.
 3. Send a `POST` request with `{ "name", "email", "company_url", "message" }` to the n8n Webhook Trigger URL. The workflow calls `POST https://b2b-lead-triage-agent.vercel.app/api/triage` with `source: "n8n"` and `X-Webhook-Secret`, then branches cleanly on `lead.status`:
-   - `auto_routed` -> posts formatted sales alert with ICP score, confidence, and draft reply.
-   - `needs_human_review` -> posts human-review alert linking directly to the Operations Inbox.
-   - `auto_rejected` -> silent archive (zero spam noise in team channels).
+   - `auto_routed` -> sends a formatted sales alert email via Resend with ICP score, confidence, and draft reply.
+   - `needs_human_review` -> sends a human-review alert email via Resend linking directly to the Operations Inbox.
+   - `auto_rejected` -> silent archive (zero spam noise in your inbox).
 
-> **Optional built-in alerts:** Setting `ALERT_WEBHOOK_URL` directly in Vercel also enables non-blocking Discord/Slack notifications via `src/lib/notify.ts` (3s timeout, executed inside Next.js `after()` so response latency is unaffected).
+> **Optional built-in alerts:** Setting `RESEND_API_KEY` + `ALERT_EMAIL_TO` (or `ALERT_WEBHOOK_URL` for Slack/Discord) directly in Vercel also enables non-blocking alerts via `src/lib/notify.ts` (3.5s timeout, executed inside Next.js `after()` so response latency is unaffected).
 >
 > **Hosting note:** n8n Cloud offers a 14-day free trial. For a permanent \$0/month setup, host n8n on Render's free web service pointed at Supabase Postgres (so restarts never wipe workflows) with a 10-minute UptimeRobot `/healthz` ping.

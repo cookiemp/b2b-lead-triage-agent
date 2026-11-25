@@ -22,6 +22,9 @@ export const POST = createTriagePostHandler({
   },
   onLeadTriaged: async (response) => {
     await sendLeadAlert(response, {
+      resendApiKey: process.env.RESEND_API_KEY,
+      alertEmailTo: process.env.ALERT_EMAIL_TO,
+      alertEmailFrom: process.env.ALERT_EMAIL_FROM,
       webhookUrl: process.env.ALERT_WEBHOOK_URL,
     });
   },
