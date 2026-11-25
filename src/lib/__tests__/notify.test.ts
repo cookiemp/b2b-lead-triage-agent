@@ -207,13 +207,13 @@ describe("sendLeadAlert", () => {
 });
 
 describe("workflows/n8n-triage-workflow.json integrity", () => {
-  it("is valid JSON wiring Webhook -> Triage API (X-Webhook-Secret) -> 3-way Resend email switch", () => {
+  it("is valid JSON wiring Webhook -> Triage API -> Switch + Resend alerts + 502 error handler without $env", () => {
     const raw = readFileSync(
       path.resolve(process.cwd(), "workflows/n8n-triage-workflow.json"),
       "utf8",
     );
     const workflow = JSON.parse(raw) as {
-      nodes: Array<{ name: string }>;
+      nodes: Array<{ name: string; retryOnFail?: boolean; onError?: string }>;
       connections: Record<string, unknown>;
     };
 
@@ -221,11 +221,18 @@ describe("workflows/n8n-triage-workflow.json integrity", () => {
     expect(nodeNames).toContain("Inbound Lead Webhook");
     expect(nodeNames).toContain("Call Triage API");
     expect(nodeNames).toContain("Route by Triage Status");
-    expect(nodeNames).toContain("Email Sales Alert (Resend)");
-    expect(nodeNames).toContain("Email Review Alert (Resend)");
+    expect(nodeNames).toContain("Email Sales Alert");
+    expect(nodeNames).toContain("Email Review Alert");
     expect(nodeNames).toContain("Silent Spam Archive");
-    expect(raw).toContain("X-Webhook-Secret");
+    expect(nodeNames).toContain("Respond Success");
+    expect(nodeNames).toContain("Respond Upstream Error");
+    expect(raw).toContain("httpCustomAuth");
     expect(raw).toContain("https://api.resend.com/emails");
     expect(raw).toContain("auto_rejected");
+    expect(raw).not.toContain("$env.");
+
+    const triageNode = workflow.nodes.find((n) => n.name === "Call Triage API");
+    expect(triageNode?.retryOnFail).toBe(true);
+    expect(triageNode?.onError).toBe("continueErrorOutput");
   });
 });

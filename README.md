@@ -134,15 +134,15 @@ npm run dev
 To run this agent inside an n8n workflow without moving deterministic business logic out of tested TypeScript:
 
 1. Import [`workflows/n8n-triage-workflow.json`](./workflows/n8n-triage-workflow.json) into n8n (n8n Cloud or self-hosted).
-2. Set three n8n environment variables:
-   - `TRIAGE_WEBHOOK_SECRET`: must match `WEBHOOK_SECRET` in Vercel.
-   - `RESEND_API_KEY`: your Resend API key (Sending access).
-   - `ALERT_EMAIL_TO`: destination email address for alerts.
-3. Send a `POST` request with `{ "name", "email", "company_url", "message" }` to the n8n Webhook Trigger URL. The workflow calls `POST https://b2b-lead-triage-agent.vercel.app/api/triage` with `source: "n8n"` and `X-Webhook-Secret`, then branches cleanly on `lead.status`:
-   - `auto_routed` -> sends a formatted sales alert email via Resend with ICP score, confidence, and draft reply.
-   - `needs_human_review` -> sends a human-review alert email via Resend linking directly to the Operations Inbox.
-   - `auto_rejected` -> silent archive (zero spam noise in your inbox).
+2. Create two **HTTP Custom Auth** credentials in n8n (secrets stay in the n8n credential store, never in node expressions):
+   - **`Triage API Webhook Secret`:** `{"headers":{"X-Webhook-Secret":"<WEBHOOK_SECRET>"}}` (matching `WEBHOOK_SECRET` in Vercel)
+   - **`Resend API Key`:** `{"headers":{"Authorization":"Bearer <RESEND_API_KEY>"}}` (Resend Sending access key)
+3. Update the recipient address (`ops@yourcompany.com`) in `Email Sales Alert` and `Email Review Alert`, attach the credentials, and publish the workflow.
+4. Send a `POST` request with `{ "name", "email", "company_url", "message" }` to the n8n Webhook Trigger URL (`/webhook/b2b-lead-triage`). The workflow calls `POST https://b2b-lead-triage-agent.vercel.app/api/triage` with `source: "n8n"` (with 3x retry and `502 Respond Upstream Error` branches on all HTTP nodes), then branches on `lead.status`:
+   - `auto_routed` -> sends a formatted sales alert email via Resend with ICP score, confidence, and draft reply, then returns `200 OK`.
+   - `needs_human_review` -> sends a human-review alert email via Resend linking directly to the Operations Inbox, then returns `200 OK`.
+   - `auto_rejected` (and `Other` fallback) -> silent archive with zero spam noise, then returns `200 OK`.
 
-> **Optional built-in alerts:** Setting `RESEND_API_KEY` + `ALERT_EMAIL_TO` (or `ALERT_WEBHOOK_URL` for Slack/Discord) directly in Vercel also enables non-blocking alerts via `src/lib/notify.ts` (3.5s timeout, executed inside Next.js `after()` so response latency is unaffected).
+> **Alert ownership:** When `RESEND_API_KEY` + `ALERT_EMAIL_TO` (or `ALERT_WEBHOOK_URL` for Slack/Discord) are configured in Vercel, `src/lib/notify.ts` sends non-blocking alerts inside Next.js `after()` (`3.5s` timeout) for `web_demo` and direct `webhook` leads, and skips `source: "n8n"` leads so n8n owns downstream email orchestration without duplicate notifications.
 >
-> **Hosting note:** n8n Cloud offers a 14-day free trial. For a permanent \$0/month setup, host n8n on Render's free web service pointed at Supabase Postgres (so restarts never wipe workflows) with a 10-minute UptimeRobot `/healthz` ping.
+> **Hosting note:** Verified live on n8n Cloud (14-day free trial). For a permanent \$0/month setup, host n8n on Render's free web service pointed at Supabase Postgres (so restarts never wipe workflows) with a 10-minute UptimeRobot `/healthz` ping.

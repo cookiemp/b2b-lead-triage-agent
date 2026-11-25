@@ -21,6 +21,10 @@ export const POST = createTriagePostHandler({
     return { allowed: true };
   },
   onLeadTriaged: async (response) => {
+    // n8n workflows own downstream email orchestration for source: "n8n" leads.
+    if (response.lead.source === "n8n") {
+      return;
+    }
     await sendLeadAlert(response, {
       resendApiKey: process.env.RESEND_API_KEY,
       alertEmailTo: process.env.ALERT_EMAIL_TO,

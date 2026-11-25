@@ -1,39 +1,30 @@
 {
-  "name": "B2B Inbound Lead Triage & Email Alert Orchestrator",
+  "name": "Triage inbound B2B leads and send email alerts",
   "nodes": [
     {
       "parameters": {
         "httpMethod": "POST",
         "path": "b2b-lead-triage",
+        "authentication": "none",
         "responseMode": "responseNode",
         "options": {}
       },
       "id": "b2b-webhook-trigger",
       "name": "Inbound Lead Webhook",
       "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2,
-      "position": [240, 300]
+      "typeVersion": 2.2,
+      "position": [240, 320]
     },
     {
       "parameters": {
         "method": "POST",
         "url": "https://b2b-lead-triage-agent.vercel.app/api/triage",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
-            {
-              "name": "X-Webhook-Secret",
-              "value": "={{ $env.TRIAGE_WEBHOOK_SECRET }}"
-            }
-          ]
-        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
         "sendBody": true,
+        "contentType": "json",
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ name: $json.body.name, email: $json.body.email, company_url: $json.body.company_url, message: $json.body.message, source: 'n8n' }) }}",
+        "jsonBody": "={{ JSON.stringify({ name: $(\"Inbound Lead Webhook\").item.json.body?.name ?? $(\"Inbound Lead Webhook\").item.json.name ?? \"\", email: $(\"Inbound Lead Webhook\").item.json.body?.email ?? $(\"Inbound Lead Webhook\").item.json.email ?? \"\", company_url: $(\"Inbound Lead Webhook\").item.json.body?.company_url ?? $(\"Inbound Lead Webhook\").item.json.company_url ?? \"\", message: $(\"Inbound Lead Webhook\").item.json.body?.message ?? $(\"Inbound Lead Webhook\").item.json.message ?? \"\", source: \"n8n\" }) }}",
         "options": {
           "timeout": 28000
         }
@@ -41,23 +32,35 @@
       "id": "b2b-call-triage-api",
       "name": "Call Triage API",
       "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [500, 300]
+      "typeVersion": 4.5,
+      "position": [528, 320],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "httpCustomAuth": {
+          "name": "Triage API Webhook Secret"
+        }
+      }
     },
     {
       "parameters": {
+        "mode": "rules",
         "rules": {
           "values": [
             {
+              "renameOutput": true,
+              "outputKey": "auto_routed",
               "conditions": {
                 "options": {
-                  "caseSensitive": true,
+                  "caseSensitive": false,
                   "leftValue": "",
                   "typeValidation": "strict"
                 },
                 "conditions": [
                   {
-                    "leftValue": "={{ $json.lead.status }}",
+                    "leftValue": "={{ $(\"Call Triage API\").item.json.lead?.status ?? \"\" }}",
                     "rightValue": "auto_routed",
                     "operator": {
                       "type": "string",
@@ -66,20 +69,20 @@
                   }
                 ],
                 "combinator": "and"
-              },
-              "renameOutput": true,
-              "outputKey": "auto_routed"
+              }
             },
             {
+              "renameOutput": true,
+              "outputKey": "needs_human_review",
               "conditions": {
                 "options": {
-                  "caseSensitive": true,
+                  "caseSensitive": false,
                   "leftValue": "",
                   "typeValidation": "strict"
                 },
                 "conditions": [
                   {
-                    "leftValue": "={{ $json.lead.status }}",
+                    "leftValue": "={{ $(\"Call Triage API\").item.json.lead?.status ?? \"\" }}",
                     "rightValue": "needs_human_review",
                     "operator": {
                       "type": "string",
@@ -88,20 +91,20 @@
                   }
                 ],
                 "combinator": "and"
-              },
-              "renameOutput": true,
-              "outputKey": "needs_human_review"
+              }
             },
             {
+              "renameOutput": true,
+              "outputKey": "auto_rejected",
               "conditions": {
                 "options": {
-                  "caseSensitive": true,
+                  "caseSensitive": false,
                   "leftValue": "",
                   "typeValidation": "strict"
                 },
                 "conditions": [
                   {
-                    "leftValue": "={{ $json.lead.status }}",
+                    "leftValue": "={{ $(\"Call Triage API\").item.json.lead?.status ?? \"\" }}",
                     "rightValue": "auto_rejected",
                     "operator": {
                       "type": "string",
@@ -110,79 +113,78 @@
                   }
                 ],
                 "combinator": "and"
-              },
-              "renameOutput": true,
-              "outputKey": "auto_rejected"
+              }
             }
           ]
         },
-        "options": {}
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "Other"
+        }
       },
       "id": "b2b-status-switch",
       "name": "Route by Triage Status",
       "type": "n8n-nodes-base.switch",
-      "typeVersion": 3.2,
-      "position": [760, 300]
+      "typeVersion": 3.5,
+      "position": [800, 320]
     },
     {
       "parameters": {
         "method": "POST",
         "url": "https://api.resend.com/emails",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "={{ 'Bearer ' + $env.RESEND_API_KEY }}"
-            },
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
         "sendBody": true,
+        "contentType": "json",
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ from: 'Lead Triage <onboarding@resend.dev>', to: [$env.ALERT_EMAIL_TO], subject: `[Auto-Routed] ${$json.lead.name} (${$json.lead.email})`, text: `Qualified lead auto-routed via n8n.\\n\\nCompany: ${$json.lead.company_url}\\nRoute: ${$json.lead.triage_json?.suggested_route ?? 'sales'}\\nICP: ${$json.lead.icp_score}/100 | Confidence: ${$json.lead.confidence_score}\\n\\nDraft reply:\\n${$json.lead.draft_reply ?? ''}\\n\\nInbox: https://b2b-lead-triage-agent.vercel.app` }) }}",
+        "jsonBody": "={{ JSON.stringify({ from: \"Lead Triage <onboarding@resend.dev>\", to: [\"ops@yourcompany.com\"], subject: \"[Auto-Routed] \" + ($(\"Call Triage API\").item.json.lead?.name ?? \"Lead\") + \" (\" + ($(\"Call Triage API\").item.json.lead?.email ?? \"\") + \")\", text: \"Qualified lead auto-routed via n8n.\\n\\nCompany: \" + ($(\"Call Triage API\").item.json.lead?.company_url ?? \"n/a\") + \"\\nRoute: \" + ($(\"Call Triage API\").item.json.lead?.triage_json?.suggested_route ?? \"sales\") + \"\\nICP: \" + ($(\"Call Triage API\").item.json.lead?.icp_score ?? \"n/a\") + \"/100 | Confidence: \" + ($(\"Call Triage API\").item.json.lead?.confidence_score ?? \"n/a\") + \"\\n\\nDraft reply:\\n\" + ($(\"Call Triage API\").item.json.lead?.draft_reply ?? \"\") + \"\\n\\nInbox: https://b2b-lead-triage-agent.vercel.app\" }) }}",
         "options": {
           "timeout": 8000
         }
       },
       "id": "b2b-email-sales",
-      "name": "Email Sales Alert (Resend)",
+      "name": "Email Sales Alert",
       "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [1040, 160]
+      "typeVersion": 4.5,
+      "position": [1104, 128],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "httpCustomAuth": {
+          "name": "Resend API Key"
+        }
+      }
     },
     {
       "parameters": {
         "method": "POST",
         "url": "https://api.resend.com/emails",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "={{ 'Bearer ' + $env.RESEND_API_KEY }}"
-            },
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
         "sendBody": true,
+        "contentType": "json",
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ from: 'Lead Triage <onboarding@resend.dev>', to: [$env.ALERT_EMAIL_TO], subject: `[Needs Review] ${$json.lead.name} (${$json.lead.email})`, text: `Inbound lead held for human approval.\\n\\nCompany: ${$json.lead.company_url}\\nReason: ${$json.routing_reason}\\nConfidence: ${$json.lead.confidence_score ?? 'n/a'}\\n\\nReview queue: https://b2b-lead-triage-agent.vercel.app` }) }}",
+        "jsonBody": "={{ JSON.stringify({ from: \"Lead Triage <onboarding@resend.dev>\", to: [\"ops@yourcompany.com\"], subject: \"[Needs Review] \" + ($(\"Call Triage API\").item.json.lead?.name ?? \"Lead\") + \" (\" + ($(\"Call Triage API\").item.json.lead?.email ?? \"\") + \")\", text: \"Inbound lead held for human approval.\\n\\nCompany: \" + ($(\"Call Triage API\").item.json.lead?.company_url ?? \"n/a\") + \"\\nReason: \" + ($(\"Call Triage API\").item.json.routing_reason ?? \"review required\") + \"\\nConfidence: \" + ($(\"Call Triage API\").item.json.lead?.confidence_score ?? \"n/a\") + \"\\n\\nReview queue: https://b2b-lead-triage-agent.vercel.app\" }) }}",
         "options": {
           "timeout": 8000
         }
       },
       "id": "b2b-email-review",
-      "name": "Email Review Alert (Resend)",
+      "name": "Email Review Alert",
       "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [1040, 300]
+      "typeVersion": 4.5,
+      "position": [1104, 320],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "httpCustomAuth": {
+          "name": "Resend API Key"
+        }
+      }
     },
     {
       "parameters": {},
@@ -190,21 +192,48 @@
       "name": "Silent Spam Archive",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [1040, 440]
+      "position": [1104, 528]
     },
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ ok: true, lead_id: $('Call Triage API').item.json.lead.id, status: $('Call Triage API').item.json.lead.status, routing_reason: $('Call Triage API').item.json.routing_reason }) }}",
+        "responseBody": "={{ JSON.stringify({ ok: true, lead_id: $(\"Call Triage API\").item.json.lead?.id ?? null, status: $(\"Call Triage API\").item.json.lead?.status ?? \"unknown\", routing_reason: $(\"Call Triage API\").item.json.routing_reason ?? \"\" }) }}",
         "options": {
           "responseCode": 200
         }
       },
-      "id": "b2b-respond-webhook",
-      "name": "Respond to Webhook",
+      "id": "b2b-respond-success",
+      "name": "Respond Success",
       "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
-      "position": [1320, 300]
+      "typeVersion": 1.5,
+      "position": [1424, 320]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: \"upstream_error\", message: $json.error?.message ?? $json.message ?? \"Upstream request failed\" }) }}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "b2b-respond-error",
+      "name": "Respond Upstream Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1424, 624]
+    },
+    {
+      "parameters": {
+        "content": "## B2B Inbound Lead Triage Orchestrator\n\nReceives inbound lead webhooks at `POST /webhook/b2b-lead-triage`, calls the Vercel `/api/triage` endpoint, routes by triage status, and dispatches Resend email alerts.\n\n**Credentials required (HTTP Custom Auth):**\n1. `Triage API Webhook Secret` (`{\"headers\":{\"X-Webhook-Secret\":\"<WEBHOOK_SECRET>\"}}`)\n2. `Resend API Key` (`{\"headers\":{\"Authorization\":\"Bearer <RESEND_API_KEY>\"}}`)",
+        "height": 272,
+        "width": 448,
+        "color": 4
+      },
+      "id": "b2b-overview-note",
+      "name": "Overview Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [160, 512]
     }
   ],
   "connections": {
@@ -227,6 +256,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Respond Upstream Error",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -234,14 +270,21 @@
       "main": [
         [
           {
-            "node": "Email Sales Alert (Resend)",
+            "node": "Email Sales Alert",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Email Review Alert (Resend)",
+            "node": "Email Review Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Silent Spam Archive",
             "type": "main",
             "index": 0
           }
@@ -255,22 +298,36 @@
         ]
       ]
     },
-    "Email Sales Alert (Resend)": {
+    "Email Sales Alert": {
       "main": [
         [
           {
-            "node": "Respond to Webhook",
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Upstream Error",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Email Review Alert (Resend)": {
+    "Email Review Alert": {
       "main": [
         [
           {
-            "node": "Respond to Webhook",
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Upstream Error",
             "type": "main",
             "index": 0
           }
@@ -281,7 +338,7 @@
       "main": [
         [
           {
-            "node": "Respond to Webhook",
+            "node": "Respond Success",
             "type": "main",
             "index": 0
           }
