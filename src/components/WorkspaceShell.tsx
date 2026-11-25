@@ -381,7 +381,7 @@ export function WorkspaceShell() {
                     <span className="shrink-0 font-mono text-[10px] tabular-nums text-[#71717a]">
                       {lead.confidence_score !== null
                         ? lead.confidence_score.toFixed(2)
-                        : "—"}
+                        : "-"}
                     </span>
                   </div>
                 </button>

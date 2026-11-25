@@ -22,9 +22,19 @@ export interface LlmTriageInput {
   readonly emailDomain: EmailDomainClass;
 }
 
+export type LlmFallbackCategory =
+  | "quota_exhausted"
+  | "overloaded"
+  | "timeout"
+  | "unavailable"
+  | "invalid_output"
+  | "provider_error";
+
 export interface LlmFallbackAttempt {
   readonly model: string;
   readonly reason: string;
+  readonly category?: LlmFallbackCategory;
+  readonly httpStatus?: number;
 }
 
 export interface LlmTriageOutput {

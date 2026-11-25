@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Lead Triage — B2B Inbound Operations",
+  title: "Lead Triage | B2B Inbound Operations",
   description:
     "Autonomous B2B inbound lead enrichment, structured Gemini triage, deterministic confidence gating, and human-in-the-loop review.",
 };

@@ -2,6 +2,7 @@ import { GoogleGenAI, Type, type Schema } from "@google/genai";
 import { DEFAULT_GEMINI_MODELS } from "@/lib/config";
 import type {
   LlmFallbackAttempt,
+  LlmFallbackCategory,
   LlmTokenUsage,
   LlmTriageFn,
   LlmTriageInput,
@@ -13,8 +14,17 @@ import {
   URGENCIES,
 } from "@/lib/schemas";
 
-export const DEFAULT_LLM_TIMEOUT_MS = 8_000;
+export const DEFAULT_LLM_TIMEOUT_MS = 6_000;
 const MAX_SCHEMA_ATTEMPTS_PER_MODEL = 2;
+
+const COOLDOWN_MS_BY_CATEGORY: Readonly<Record<LlmFallbackCategory, number>> = {
+  quota_exhausted: 15 * 60_000, // 15 min: skip exhausted daily/RPM free-tier bucket
+  unavailable: 30 * 60_000, // 30 min: model deprecated or 404
+  overloaded: 60_000, // 60 sec: transient 503 high demand
+  timeout: 30_000, // 30 sec: slow upstream
+  invalid_output: 0,
+  provider_error: 15_000,
+};
 
 export type LlmErrorCode =
   | "TIMEOUT"
@@ -64,6 +74,7 @@ export interface GeminiClientOptions {
   readonly timeoutMs?: number;
   readonly generateContent?: RawLlmGenerateFn;
   readonly now?: () => number;
+  readonly enableCooldown?: boolean;
 }
 
 const TRIAGE_RESPONSE_SCHEMA: Schema = {
@@ -125,6 +136,113 @@ function sanitizeDelimiterTag(value: string): string {
   return value.replace(/<\/?untrusted_/gi, (match) =>
     match.replace("<", "&lt;"),
   );
+}
+
+/**
+ * Normalizes verbose provider SDK / Google RPC JSON error messages into compact,
+ * structured summaries suitable for Langfuse telemetry and audit logs.
+ */
+export function classifyProviderError(error: unknown): {
+  readonly category: LlmFallbackCategory;
+  readonly httpStatus?: number;
+  readonly reason: string;
+} {
+  if (error instanceof LlmTriageError && error.code === "TIMEOUT") {
+    return {
+      category: "timeout",
+      reason: error.message,
+    };
+  }
+
+  const rawMessage = error instanceof Error ? error.message : String(error);
+
+  // Extract structured Google RPC payload when the SDK embeds JSON in error.message
+  let httpStatus: number | undefined;
+  let rpcStatus = "";
+  let rpcMessage = rawMessage;
+
+  const jsonStart = rawMessage.indexOf("{");
+  if (jsonStart !== -1) {
+    try {
+      const parsed = JSON.parse(rawMessage.slice(jsonStart)) as {
+        error?: { code?: number; status?: string; message?: string };
+      };
+      if (parsed.error) {
+        if (typeof parsed.error.code === "number") {
+          httpStatus = parsed.error.code;
+        }
+        if (typeof parsed.error.status === "string") {
+          rpcStatus = parsed.error.status.toUpperCase();
+        }
+        if (typeof parsed.error.message === "string") {
+          rpcMessage = parsed.error.message;
+        }
+      }
+    } catch {
+      // Non-JSON message; inspect raw text below.
+    }
+  }
+
+  if (httpStatus === undefined) {
+    const codeMatch = /\b(400|401|403|404|429|500|502|503|504)\b/.exec(
+      rawMessage,
+    );
+    if (codeMatch?.[1]) {
+      httpStatus = Number(codeMatch[1]);
+    }
+  }
+
+  const lower = `${rpcStatus} ${rpcMessage}`.toLowerCase();
+
+  if (
+    httpStatus === 429 ||
+    rpcStatus === "RESOURCE_EXHAUSTED" ||
+    lower.includes("quota exceeded") ||
+    lower.includes("rate limit")
+  ) {
+    const retryMatch = /retry in ([0-9a-z.]+)/i.exec(rpcMessage);
+    const cleanedRetry = retryMatch?.[1]?.replace(/\.+$/, "");
+    const retryNote = cleanedRetry ? ` (retry in ${cleanedRetry})` : "";
+    return {
+      category: "quota_exhausted",
+      httpStatus: httpStatus ?? 429,
+      reason: `HTTP 429 quota exhausted${retryNote}`,
+    };
+  }
+
+  if (
+    httpStatus === 503 ||
+    rpcStatus === "UNAVAILABLE" ||
+    lower.includes("high demand") ||
+    lower.includes("overloaded")
+  ) {
+    return {
+      category: "overloaded",
+      httpStatus: httpStatus ?? 503,
+      reason: "HTTP 503 model temporarily overloaded",
+    };
+  }
+
+  if (
+    httpStatus === 404 ||
+    rpcStatus === "NOT_FOUND" ||
+    lower.includes("not found")
+  ) {
+    return {
+      category: "unavailable",
+      httpStatus: httpStatus ?? 404,
+      reason: "HTTP 404 model unavailable",
+    };
+  }
+
+  const firstLine = (rpcMessage.split(/\r?\n/)[0] ?? "Provider error").trim();
+  const compact =
+    firstLine.length > 140 ? `${firstLine.slice(0, 140)}...` : firstLine;
+  return {
+    category: "provider_error",
+    httpStatus,
+    reason: httpStatus ? `HTTP ${httpStatus} ${compact}` : compact,
+  };
 }
 
 /**
@@ -272,11 +390,8 @@ function createSdkGenerateFn(apiKey: string): RawLlmGenerateFn {
 }
 
 /**
- * Creates a resilient Gemini Flash triage client with a configurable model fallback chain.
- * - Tries models in order with an explicit per-attempt timeout (default 8s).
- * - Immediately falls back to the next model on transport/availability errors (429, 500, 503, 404, timeout).
- * - Performs up to 1 JSON/Zod repair retry scoped to the responding model; if still invalid, falls back to the next model.
- * - Throws a bounded LlmTriageError if all models fail (caught by pipeline.ts for fail-safe persistence).
+ * Creates a resilient Gemini Flash triage client with a configurable model fallback chain,
+ * structured provider error normalization, and in-memory cooldowns for quota/overload skips.
  */
 export function createGeminiTriageClient(
   options: GeminiClientOptions,
@@ -284,6 +399,8 @@ export function createGeminiTriageClient(
   const modelChain = resolveModelChain(options);
   const timeoutMs = options.timeoutMs ?? DEFAULT_LLM_TIMEOUT_MS;
   const now = options.now ?? Date.now;
+  const enableCooldown = options.enableCooldown ?? true;
+  const cooldownUntilMs = new Map<string, number>();
 
   const generateFn: RawLlmGenerateFn =
     options.generateContent ??
@@ -296,17 +413,46 @@ export function createGeminiTriageClient(
       return createSdkGenerateFn(options.apiKey);
     })();
 
+  function getOrderedCandidates(currentMs: number): readonly string[] {
+    if (!enableCooldown || modelChain.length <= 1) {
+      return modelChain;
+    }
+
+    const healthy: string[] = [];
+    const cooling: Array<{ model: string; until: number }> = [];
+
+    for (const model of modelChain) {
+      const until = cooldownUntilMs.get(model) ?? 0;
+      if (until <= currentMs) {
+        healthy.push(model);
+      } else {
+        cooling.push({ model, until });
+      }
+    }
+
+    // If healthy models exist, skip cooled-down models to avoid wasted latency.
+    // If every model is cooling down, probe the earliest-expiring ones as a last resort.
+    if (healthy.length > 0) {
+      return healthy;
+    }
+
+    return cooling
+      .sort((a, b) => a.until - b.until)
+      .map((entry) => entry.model);
+  }
+
   return async function triageWithGemini(
     input: LlmTriageInput,
   ): Promise<LlmTriageOutput> {
     const startedAt = now();
+    const candidates = getOrderedCandidates(startedAt);
     let totalAttempts = 0;
     const fallbackAttempts: LlmFallbackAttempt[] = [];
     let lastErrorCode: LlmErrorCode = "PROVIDER_ERROR";
 
-    for (const model of modelChain) {
+    for (const model of candidates) {
       let retryFeedback: string | undefined;
-      let modelFailureReason: string | null = null;
+      let modelFailure: LlmFallbackAttempt | null = null;
 
       for (
         let schemaAttempt = 1;
@@ -332,15 +478,23 @@ export function createGeminiTriageClient(
             model,
           );
         } catch (error: unknown) {
-          if (error instanceof LlmTriageError && error.code === "TIMEOUT") {
-            lastErrorCode = "TIMEOUT";
-            modelFailureReason = `timeout (${timeoutMs}ms)`;
-          } else {
-            lastErrorCode = "PROVIDER_ERROR";
-            modelFailureReason =
-              error instanceof Error ? error.message : "provider error";
+          const classified = classifyProviderError(error);
+          lastErrorCode =
+            classified.category === "timeout" ? "TIMEOUT" : "PROVIDER_ERROR";
+          modelFailure = {
+            model,
+            category: classified.category,
+            httpStatus: classified.httpStatus,
+            reason: classified.reason,
+          };
+
+          if (enableCooldown) {
+            const cooldownDuration = COOLDOWN_MS_BY_CATEGORY[classified.category];
+            if (cooldownDuration > 0) {
+              cooldownUntilMs.set(model, now() + cooldownDuration);
+            }
           }
-          // Transient/availability error: fall back immediately to next model in chain.
+          // Transient/availability error: fall back immediately to next model.
           break;
         }
 
@@ -351,13 +505,18 @@ export function createGeminiTriageClient(
           lastErrorCode = "INVALID_OUTPUT";
           const parseMessage =
             error instanceof Error ? error.message : "Invalid JSON syntax";
-          modelFailureReason = `json_parse_error: ${parseMessage}`;
+          modelFailure = {
+            model,
+            category: "invalid_output",
+            reason: `json_parse_error: ${parseMessage}`,
+          };
           retryFeedback = `JSON parse error: ${parseMessage}`;
           continue;
         }
 
         const validated = TriageResultSchema.safeParse(parsedJson);
         if (validated.success) {
+          cooldownUntilMs.delete(model);
           return {
             result: validated.data,
             model,
@@ -372,28 +531,29 @@ export function createGeminiTriageClient(
         const schemaIssues = validated.error.issues
           .map((issue) => `${issue.path.join(".") || "root"}: ${issue.message}`)
           .join("; ");
-        modelFailureReason = `schema_validation_error: ${schemaIssues}`;
+        modelFailure = {
+          model,
+          category: "invalid_output",
+          reason: `schema_validation_error: ${schemaIssues}`,
+        };
         retryFeedback = `Schema validation errors: ${schemaIssues}`;
       }
 
-      if (modelFailureReason !== null) {
-        fallbackAttempts.push({
-          model,
-          reason: modelFailureReason,
-        });
+      if (modelFailure !== null) {
+        fallbackAttempts.push(modelFailure);
       }
     }
 
     const summary = fallbackAttempts
-      .map((entry) => `${entry.model}: ${entry.reason}`)
-      .join(" | ");
+      .map((entry) => `${entry.model} (${entry.reason})`)
+      .join("; ");
 
     const finalCode: LlmErrorCode =
       modelChain.length === 1 ? lastErrorCode : "ALL_MODELS_FAILED";
 
     throw new LlmTriageError(
       finalCode,
-      `All configured Gemini models failed (${modelChain.join(" -> ")}): ${summary}`,
+      `All ${candidates.length} Gemini model(s) failed: ${summary}`,
       totalAttempts,
       fallbackAttempts,
     );

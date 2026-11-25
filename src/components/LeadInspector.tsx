@@ -432,7 +432,7 @@ export function LeadInspector({
                 <dd className="font-mono text-[11px] font-medium tabular-nums text-[#111113]">
                   {lead.confidence_score !== null
                     ? lead.confidence_score.toFixed(2)
-                    : "—"}
+                    : "-"}
                 </dd>
               </div>
               {confidencePct !== null && (
@@ -457,14 +457,14 @@ export function LeadInspector({
             <div className="flex items-center justify-between gap-2">
               <dt className="text-[#71717a]">ICP fit</dt>
               <dd className="font-mono text-[11px] font-medium tabular-nums text-[#111113]">
-                {lead.icp_score !== null ? `${lead.icp_score} / 100` : "—"}
+                {lead.icp_score !== null ? `${lead.icp_score} / 100` : "-"}
               </dd>
             </div>
 
             <div className="flex items-center justify-between gap-2">
               <dt className="text-[#71717a]">Urgency</dt>
               <dd className="capitalize text-[#111113]">
-                {triage?.urgency ?? "—"}
+                {triage?.urgency ?? "-"}
               </dd>
             </div>
 

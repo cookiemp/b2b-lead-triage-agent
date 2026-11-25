@@ -32,7 +32,7 @@ export const DEMO_LEAD_PRESETS: readonly LeadPreset[] = [
       email: "jordan@northstarholdings.example",
       company_url: "https://northstarholdings.example",
       message:
-        "Hey, saw your site. Curious what you guys do—maybe we can chat sometime next quarter depending on what direction we take.",
+        "Hey, saw your site. Curious what you guys do, maybe we can chat sometime next quarter depending on what direction we take.",
     },
   },
   {

@@ -33,6 +33,12 @@ next-env.d.ts
 # Vercel
 .vercel
 
+# Internal planning docs (kept local, excluded from public repo)
+/docs/
+
 # OS
 .DS_Store
 Thumbs.db
+
+.vercel
+.env*

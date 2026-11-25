@@ -251,6 +251,23 @@ export function createLangfuseTelemetry(
           const ts = now();
           const message =
             error instanceof Error ? error.message : String(error);
+          const extra: Record<string, unknown> = { stage, message };
+          if (
+            typeof error === "object" &&
+            error !== null &&
+            "code" in error &&
+            typeof error.code === "string"
+          ) {
+            extra.error_code = error.code;
+          }
+          if (
+            typeof error === "object" &&
+            error !== null &&
+            "fallbackAttempts" in error &&
+            Array.isArray(error.fallbackAttempts)
+          ) {
+            extra.fallback_attempts = error.fallbackAttempts;
+          }
           childSpans.push({
             traceId,
             spanId: generateHexId(8),
@@ -262,10 +279,7 @@ export function createLangfuseTelemetry(
             attributes: [
               strAttr("langfuse.observation.type", "event"),
               strAttr("langfuse.observation.level", "ERROR"),
-              strAttr(
-                "langfuse.observation.output",
-                JSON.stringify({ stage, message }),
-              ),
+              strAttr("langfuse.observation.output", JSON.stringify(extra)),
             ],
             status: { code: 2, message },
           });

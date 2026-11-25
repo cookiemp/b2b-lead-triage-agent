@@ -4,7 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { PublicIntakeForm } from "@/components/PublicIntakeForm";
 
 export const metadata: Metadata = {
-  title: "Contact Sales — Lead Triage",
+  title: "Contact Sales | Lead Triage",
   description: "Submit an inbound B2B inquiry to our automated triage workflow.",
 };
 

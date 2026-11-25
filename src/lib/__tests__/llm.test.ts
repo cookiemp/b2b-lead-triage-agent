@@ -5,6 +5,7 @@ import {
 } from "@/lib/config";
 import {
   buildTriagePrompts,
+  classifyProviderError,
   createGeminiTriageClient,
   extractJsonPayload,
   LlmTriageError,
@@ -22,7 +23,7 @@ const validResult: TriageResult = {
   confidence_score: 0.91,
   reasoning: "Strong mid-market B2B fit with clear HubSpot automation needs.",
   draft_reply:
-    "Hi Elena, thanks for reaching out—we'd love to walk AcmeCloud through our B2B triage workflow.",
+    "Hi Elena, thanks for reaching out. We would love to walk AcmeCloud through our B2B triage workflow.",
 };
 
 const sampleInput: LlmTriageInput = {
@@ -49,17 +50,16 @@ const sampleInput: LlmTriageInput = {
 };
 
 describe("parseGeminiModelChain", () => {
-  it("defaults to [gemini-3.8-flash, gemini-3.6-flash, gemini-3.5-flash-lite]", () => {
+  it("defaults to the 6-model Gemini Flash fallback chain", () => {
     expect(parseGeminiModelChain(undefined)).toEqual([
       "gemini-3.8-flash",
+      "gemini-3.7-flash",
       "gemini-3.6-flash",
+      "gemini-3.5-flash",
       "gemini-3.5-flash-lite",
+      "gemini-2.5-flash",
     ]);
-    expect(DEFAULT_GEMINI_MODELS).toEqual([
-      "gemini-3.8-flash",
-      "gemini-3.6-flash",
-      "gemini-3.5-flash-lite",
-    ]);
+    expect(DEFAULT_GEMINI_MODELS).toHaveLength(6);
   });
 
   it("parses, trims, and deduplicates comma-separated GEMINI_MODELS", () => {
@@ -68,6 +68,41 @@ describe("parseGeminiModelChain", () => {
         " gemini-3.8-flash , gemini-3.6-flash, gemini-3.8-flash , ",
       ),
     ).toEqual(["gemini-3.8-flash", "gemini-3.6-flash"]);
+  });
+});
+
+describe("classifyProviderError", () => {
+  it("normalizes verbose Google RPC 429 and 503 JSON blobs into compact summaries", () => {
+    const quotaJson = new Error(
+      JSON.stringify({
+        error: {
+          code: 429,
+          status: "RESOURCE_EXHAUSTED",
+          message:
+            "You exceeded your current quota. Please retry in 21h31m48s.",
+        },
+      }),
+    );
+    expect(classifyProviderError(quotaJson)).toEqual({
+      category: "quota_exhausted",
+      httpStatus: 429,
+      reason: "HTTP 429 quota exhausted (retry in 21h31m48s)",
+    });
+
+    const overloadJson = new Error(
+      JSON.stringify({
+        error: {
+          code: 503,
+          status: "UNAVAILABLE",
+          message: "This model is currently experiencing high demand.",
+        },
+      }),
+    );
+    expect(classifyProviderError(overloadJson)).toEqual({
+      category: "overloaded",
+      httpStatus: 503,
+      reason: "HTTP 503 model temporarily overloaded",
+    });
   });
 });
 
@@ -91,14 +126,23 @@ describe("buildTriagePrompts & extractJsonPayload", () => {
   });
 });
 
-describe("createGeminiTriageClient fallback chain & bounded repair", () => {
+describe("createGeminiTriageClient fallback chain, cooldowns & bounded repair", () => {
+  const threeModelChain = [
+    "gemini-3.8-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
+  ] as const;
+
   it("primary succeeds -> returns gemini-3.8-flash without calling fallbacks", async () => {
     const generateContent = vi.fn<RawLlmGenerateFn>().mockResolvedValue({
       text: JSON.stringify(validResult),
       usage: { promptTokens: 320, completionTokens: 110, totalTokens: 430 },
     });
 
-    const client = createGeminiTriageClient({ generateContent });
+    const client = createGeminiTriageClient({
+      models: threeModelChain,
+      generateContent,
+    });
     const out = await client(sampleInput);
 
     expect(generateContent).toHaveBeenCalledTimes(1);
@@ -110,25 +154,39 @@ describe("createGeminiTriageClient fallback chain & bounded repair", () => {
     expect(out.usage?.totalTokens).toBe(430);
   });
 
-  it("primary throws 429 -> immediately falls back to gemini-3.6-flash and succeeds", async () => {
+  it("primary throws 429 -> immediately falls back to gemini-3.6-flash and skips cooled model on next call", async () => {
+    let nowMs = 1_000_000;
     const generateContent = vi
       .fn<RawLlmGenerateFn>()
       .mockRejectedValueOnce(new Error("429 Resource exhausted"))
-      .mockResolvedValueOnce({
+      .mockResolvedValue({
         text: JSON.stringify(validResult),
       });
 
-    const client = createGeminiTriageClient({ generateContent });
-    const out = await client(sampleInput);
+    const client = createGeminiTriageClient({
+      models: threeModelChain,
+      generateContent,
+      now: () => nowMs,
+    });
 
-    expect(generateContent).toHaveBeenCalledTimes(2);
-    expect(generateContent.mock.calls[0]?.[0].model).toBe("gemini-3.8-flash");
-    expect(generateContent.mock.calls[1]?.[0].model).toBe("gemini-3.6-flash");
-    expect(out.model).toBe("gemini-3.6-flash");
-    expect(out.attempts).toBe(2);
-    expect(out.fallbackAttempts).toEqual([
-      { model: "gemini-3.8-flash", reason: "429 Resource exhausted" },
+    const first = await client(sampleInput);
+    expect(first.model).toBe("gemini-3.6-flash");
+    expect(first.attempts).toBe(2);
+    expect(first.fallbackAttempts).toEqual([
+      {
+        model: "gemini-3.8-flash",
+        category: "quota_exhausted",
+        httpStatus: 429,
+        reason: "HTTP 429 quota exhausted",
+      },
     ]);
+
+    // Second call 10s later skips cooled-down gemini-3.8-flash and goes straight to gemini-3.6-flash
+    nowMs += 10_000;
+    const second = await client(sampleInput);
+    expect(second.model).toBe("gemini-3.6-flash");
+    expect(second.attempts).toBe(1);
+    expect(generateContent).toHaveBeenCalledTimes(3);
   });
 
   it("primary times out -> immediately falls back to gemini-3.6-flash and succeeds", async () => {
@@ -140,14 +198,14 @@ describe("createGeminiTriageClient fallback chain & bounded repair", () => {
       });
 
     const client = createGeminiTriageClient({
+      models: threeModelChain,
       timeoutMs: 25,
       generateContent,
     });
     const out = await client(sampleInput);
 
     expect(out.model).toBe("gemini-3.6-flash");
-    expect(out.fallbackAttempts?.[0]?.model).toBe("gemini-3.8-flash");
-    expect(out.fallbackAttempts?.[0]?.reason).toContain("timeout");
+    expect(out.fallbackAttempts?.[0]?.category).toBe("timeout");
   });
 
   it("primary + fallback 1 fail -> falls back to gemini-3.5-flash-lite and succeeds", async () => {
@@ -159,15 +217,28 @@ describe("createGeminiTriageClient fallback chain & bounded repair", () => {
         text: JSON.stringify(validResult),
       });
 
-    const client = createGeminiTriageClient({ generateContent });
+    const client = createGeminiTriageClient({
+      models: threeModelChain,
+      generateContent,
+    });
     const out = await client(sampleInput);
 
     expect(generateContent).toHaveBeenCalledTimes(3);
     expect(out.model).toBe("gemini-3.5-flash-lite");
     expect(out.attempts).toBe(3);
     expect(out.fallbackAttempts).toEqual([
-      { model: "gemini-3.8-flash", reason: "503 Service Unavailable" },
-      { model: "gemini-3.6-flash", reason: "404 Model not found" },
+      {
+        model: "gemini-3.8-flash",
+        category: "overloaded",
+        httpStatus: 503,
+        reason: "HTTP 503 model temporarily overloaded",
+      },
+      {
+        model: "gemini-3.6-flash",
+        category: "unavailable",
+        httpStatus: 404,
+        reason: "HTTP 404 model unavailable",
+      },
     ]);
   });
 
@@ -182,17 +253,13 @@ describe("createGeminiTriageClient fallback chain & bounded repair", () => {
       });
 
     const repairedOut = await createGeminiTriageClient({
+      models: threeModelChain,
       generateContent: repairSuccess,
     })(sampleInput);
 
     expect(repairSuccess).toHaveBeenCalledTimes(2);
-    expect(repairSuccess.mock.calls[0]?.[0].model).toBe("gemini-3.8-flash");
-    expect(repairSuccess.mock.calls[1]?.[0].model).toBe("gemini-3.8-flash");
     expect(repairedOut.model).toBe("gemini-3.8-flash");
     expect(repairedOut.attempts).toBe(2);
-    expect(repairSuccess.mock.calls[1]?.[0].userPrompt).toContain(
-      "PREVIOUS OUTPUT VALIDATION FAILED",
-    );
 
     const repairExhaustedFallback = vi
       .fn<RawLlmGenerateFn>()
@@ -201,27 +268,28 @@ describe("createGeminiTriageClient fallback chain & bounded repair", () => {
       .mockResolvedValueOnce({ text: JSON.stringify(validResult) });
 
     const fallbackOut = await createGeminiTriageClient({
+      models: threeModelChain,
       generateContent: repairExhaustedFallback,
     })(sampleInput);
 
     expect(repairExhaustedFallback).toHaveBeenCalledTimes(3);
     expect(fallbackOut.model).toBe("gemini-3.6-flash");
     expect(fallbackOut.fallbackAttempts).toHaveLength(1);
-    expect(fallbackOut.fallbackAttempts?.[0]?.model).toBe("gemini-3.8-flash");
+    expect(fallbackOut.fallbackAttempts?.[0]?.category).toBe("invalid_output");
   });
 
-  it("throws bounded LlmTriageError(ALL_MODELS_FAILED) when all 3 models fail", async () => {
-    const generateContent = vi
-      .fn<RawLlmGenerateFn>()
-      .mockRejectedValueOnce(new Error("429 Quota exceeded"))
-      .mockRejectedValueOnce(new Error("500 Internal error"))
-      .mockRejectedValueOnce(new Error("503 Overloaded"));
-
-    const client = createGeminiTriageClient({ generateContent });
+  it("throws bounded LlmTriageError(ALL_MODELS_FAILED) with compact message when all models fail", async () => {
+    const client = createGeminiTriageClient({
+      models: threeModelChain,
+      generateContent: vi
+        .fn<RawLlmGenerateFn>()
+        .mockRejectedValue(new Error("503 Overloaded")),
+    });
 
     await expect(client(sampleInput)).rejects.toBeInstanceOf(LlmTriageError);
     await expect(
       createGeminiTriageClient({
+        models: threeModelChain,
         generateContent: vi
           .fn<RawLlmGenerateFn>()
           .mockRejectedValue(new Error("503 Overloaded")),

@@ -168,11 +168,11 @@
       "name": "Jordan Lee",
       "email": "jordan@northstarholdings.example",
       "company_url": "https://northstarholdings.example",
-      "message": "Hey, saw your site. Curious what you guys do—maybe we can chat sometime next quarter?"
+      "message": "Hey, saw your site. Curious what you guys do, maybe we can chat sometime next quarter?"
     },
     "mock_enrichment": {
       "ok": true,
-      "summary": "Northstar Holdings — Coming soon."
+      "summary": "Northstar Holdings, Coming soon."
     }
   },
   {
@@ -204,7 +204,7 @@
     },
     "mock_enrichment": {
       "ok": true,
-      "summary": "StealthMode — Password protected preview."
+      "summary": "StealthMode, Password protected preview."
     }
   },
   {
@@ -216,7 +216,7 @@
       "name": "Chris Morales",
       "email": "chris@midwestlogistics.example",
       "company_url": "https://midwestlogistics.example",
-      "message": "Not sure if this is sales or support—our previous vendor left and someone mentioned your API might replace parts of our billing scripts."
+      "message": "Not sure if this is sales or support, our previous vendor left and someone mentioned your API might replace parts of our billing scripts."
     },
     "mock_enrichment": {
       "ok": true,
@@ -264,7 +264,7 @@
       "name": "Carlos Mendez",
       "email": "carlos.mendez.consulting@gmail.com",
       "company_url": "https://slow-timeout-site.example",
-      "message": "Helping a Series B client evaluate inbound lead enrichment tools—can we schedule a call?"
+      "message": "Helping a Series B client evaluate inbound lead enrichment tools, can we schedule a call?"
     },
     "mock_enrichment": {
       "ok": false,
