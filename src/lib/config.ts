@@ -52,6 +52,10 @@ const LiveTriageEnvSchema = SupabaseEnvSchema.extend({
   GEMINI_API_KEY: z.string().trim().min(1),
   GEMINI_MODELS: OptionalNonEmptyString,
   GEMINI_MODEL: OptionalNonEmptyString,
+  ALERT_WEBHOOK_URL: z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+    z.string().trim().url().optional(),
+  ),
 });
 
 export interface SupabaseConfig {
@@ -71,6 +75,7 @@ export interface LiveTriageConfig {
   readonly geminiModels: readonly [string, ...string[]];
   readonly supabase: SupabaseConfig;
   readonly langfuse: LangfuseConfig | null;
+  readonly alertWebhookUrl: string | null;
 }
 
 /**
@@ -147,5 +152,6 @@ export function loadLiveTriageConfig(
       demoDailyCap: parsed.data.DEMO_DAILY_CAP,
     },
     langfuse: loadLangfuseConfig(env),
+    alertWebhookUrl: parsed.data.ALERT_WEBHOOK_URL ?? null,
   };
 }

@@ -1,4 +1,5 @@
 import { resolveLiveTriageRuntime } from "@/lib/live-deps";
+import { sendLeadAlert } from "@/lib/notify";
 import { createTriagePostHandler } from "@/lib/triage-handler";
 
 export const maxDuration = 30;
@@ -18,5 +19,10 @@ export const POST = createTriagePostHandler({
       return { allowed: false, retryAfterSec: 3600 };
     }
     return { allowed: true };
+  },
+  onLeadTriaged: async (response) => {
+    await sendLeadAlert(response, {
+      webhookUrl: process.env.ALERT_WEBHOOK_URL,
+    });
   },
 });

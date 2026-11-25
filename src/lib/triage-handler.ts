@@ -33,6 +33,7 @@ export interface TriageRouteHandlerConfig {
   readonly getWebhookSecret?: () => string | undefined;
   readonly demoRateLimiter?: RateLimiter;
   readonly checkDailyDemoQuota?: DailyDemoQuotaCheckFn;
+  readonly onLeadTriaged?: (response: Awaited<ReturnType<typeof runTriagePipeline>>["response"]) => Promise<void>;
   readonly scheduleFlush?: (task: () => Promise<void>) => void;
 }
 
@@ -42,6 +43,7 @@ export function createTriagePostHandler(config: TriageRouteHandlerConfig) {
     getWebhookSecret = () => process.env.WEBHOOK_SECRET,
     demoRateLimiter = defaultDemoRateLimiter,
     checkDailyDemoQuota,
+    onLeadTriaged,
     scheduleFlush = defaultScheduleFlush,
   } = config;
 
@@ -133,7 +135,12 @@ export function createTriagePostHandler(config: TriageRouteHandlerConfig) {
         parsed.data,
         deps,
       );
-      scheduleFlush(flushTelemetry);
+      scheduleFlush(async () => {
+        await Promise.allSettled([
+          flushTelemetry(),
+          onLeadTriaged ? onLeadTriaged(response) : Promise.resolve(),
+        ]);
+      });
       return NextResponse.json(response, { status: 200 });
     } catch {
       return NextResponse.json(
