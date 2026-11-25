@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   InboundLeadSchema,
@@ -234,5 +236,26 @@ describe("LeadDecisionSchema", () => {
         edited_draft_reply: "   ",
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("evals/leads_dataset.json integrity", () => {
+  it("contains 20 synthetic cases that all pass InboundLeadSchema", () => {
+    const raw = readFileSync(
+      path.resolve(process.cwd(), "evals/leads_dataset.json"),
+      "utf8",
+    );
+    const dataset = JSON.parse(raw) as Array<{
+      id: string;
+      lead: Record<string, unknown>;
+    }>;
+
+    expect(dataset).toHaveLength(20);
+    for (const item of dataset) {
+      const parsed = InboundLeadSchema.safeParse(item.lead);
+      expect(parsed.success, `eval case ${item.id} failed InboundLeadSchema`).toBe(
+        true,
+      );
+    }
   });
 });

@@ -23,10 +23,16 @@ function defaultScheduleFlush(task: () => Promise<void>): void {
   }
 }
 
+export type DailyDemoQuotaCheckFn = () => Promise<
+  | { readonly allowed: true }
+  | { readonly allowed: false; readonly retryAfterSec: number }
+>;
+
 export interface TriageRouteHandlerConfig {
   readonly resolveDeps: () => TriagePipelineDeps | null;
   readonly getWebhookSecret?: () => string | undefined;
   readonly demoRateLimiter?: RateLimiter;
+  readonly checkDailyDemoQuota?: DailyDemoQuotaCheckFn;
   readonly scheduleFlush?: (task: () => Promise<void>) => void;
 }
 
@@ -35,6 +41,7 @@ export function createTriagePostHandler(config: TriageRouteHandlerConfig) {
     resolveDeps,
     getWebhookSecret = () => process.env.WEBHOOK_SECRET,
     demoRateLimiter = defaultDemoRateLimiter,
+    checkDailyDemoQuota,
     scheduleFlush = defaultScheduleFlush,
   } = config;
 
@@ -98,6 +105,27 @@ export function createTriagePostHandler(config: TriageRouteHandlerConfig) {
         },
         { status: 503 },
       );
+    }
+
+    if (parsed.data.source === "web_demo" && checkDailyDemoQuota) {
+      try {
+        const quota = await checkDailyDemoQuota();
+        if (!quota.allowed) {
+          return NextResponse.json(
+            {
+              error: "DAILY_DEMO_QUOTA_EXCEEDED",
+              message:
+                "Daily public demo quota has been reached to protect free-tier API limits. Please try again later.",
+            },
+            {
+              status: 429,
+              headers: { "Retry-After": String(quota.retryAfterSec) },
+            },
+          );
+        }
+      } catch {
+        // Fail open on quota-count lookup error so legitimate leads are not blocked by a transient count query error.
+      }
     }
 
     try {

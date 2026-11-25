@@ -458,4 +458,33 @@ describe("POST /api/triage integration (mocked external calls)", () => {
     expect(body.email_domain).toBe("disposable");
     expect(body.routing_reason).toBe("disposable_email_flagged");
   });
+
+  it("enforces daily demo quota cap with 429 DAILY_DEMO_QUOTA_EXCEEDED without affecting webhook calls", async () => {
+    const { repo, enrichSpy, triageWithLlm } = createTestHarness();
+    const handler = createTriagePostHandler({
+      resolveDeps: () => ({
+        enrich: enrichSpy,
+        triageWithLlm,
+        repo,
+        telemetry: createNoopTelemetry(),
+      }),
+      getWebhookSecret: () => VALID_SECRET,
+      demoRateLimiter: createInMemoryRateLimiter({
+        maxRequests: 10,
+        windowMs: 60_000,
+      }),
+      checkDailyDemoQuota: async () => ({ allowed: false, retryAfterSec: 3600 }),
+    });
+
+    const demoRes = await handler(
+      makeRequest({ ...validPayload, source: "web_demo" }),
+    );
+    expect(demoRes.status).toBe(429);
+    expect((await demoRes.json()).error).toBe("DAILY_DEMO_QUOTA_EXCEEDED");
+
+    const webhookRes = await handler(
+      makeRequest(validPayload, { "x-webhook-secret": VALID_SECRET }),
+    );
+    expect(webhookRes.status).toBe(200);
+  });
 });
