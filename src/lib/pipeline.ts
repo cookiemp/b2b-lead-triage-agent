@@ -22,11 +22,17 @@ export interface LlmTriageInput {
   readonly emailDomain: EmailDomainClass;
 }
 
+export interface LlmFallbackAttempt {
+  readonly model: string;
+  readonly reason: string;
+}
+
 export interface LlmTriageOutput {
   readonly result: TriageResult;
   readonly model: string;
   readonly latencyMs: number;
   readonly attempts: number;
+  readonly fallbackAttempts?: readonly LlmFallbackAttempt[];
   readonly usage?: LlmTokenUsage;
 }
 

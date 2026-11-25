@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { DEFAULT_GEMINI_MODEL } from "../src/lib/config";
+import { parseGeminiModelChain } from "../src/lib/config";
 import { enrichCompanyFromUrl, type EnrichmentOutcome } from "../src/lib/enrichment";
 import { createGeminiTriageClient } from "../src/lib/llm";
 import {
@@ -104,14 +104,17 @@ async function main(): Promise<void> {
   }
 
   const useLiveEnrichment = process.argv.includes("--live-enrichment");
-  const model = process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
+  const models = parseGeminiModelChain(
+    process.env.GEMINI_MODELS,
+    process.env.GEMINI_MODEL,
+  );
 
   const datasetPath = path.resolve(process.cwd(), "evals/leads_dataset.json");
   const dataset = JSON.parse(readFileSync(datasetPath, "utf8")) as EvalCase[];
 
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
-  const baseLlm = createGeminiTriageClient({ apiKey, model });
+  const baseLlm = createGeminiTriageClient({ apiKey, models });
 
   const latenciesMs: number[] = [];
   let statusMatches = 0;
@@ -123,7 +126,7 @@ async function main(): Promise<void> {
   let injectionCaught = 0;
 
   console.log(
-    `Running ${dataset.length}-case evaluation suite (model=${model}, liveEnrichment=${useLiveEnrichment})...\n`,
+    `Running ${dataset.length}-case evaluation suite (models=${models.join(" -> ")}, liveEnrichment=${useLiveEnrichment})...\n`,
   );
 
   for (const item of dataset) {

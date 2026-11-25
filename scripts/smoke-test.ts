@@ -28,10 +28,13 @@ async function main(): Promise<void> {
 
   const store = createSupabaseLeadStore(config.supabase);
   const telemetry = createLangfuseTelemetry(config.langfuse);
-  const triageWithLlm = createGeminiTriageClient({
+  const baseLlm = createGeminiTriageClient({
     apiKey: config.geminiApiKey,
-    model: config.geminiModel,
+    models: config.geminiModels,
   });
+
+  let modelUsed: string | null = null;
+  let fallbackAttempts: readonly { model: string; reason: string }[] = [];
 
   const lead = InboundLeadSchema.parse({
     name: "Smoke Test Operator",
@@ -43,11 +46,18 @@ async function main(): Promise<void> {
     idempotency_nonce: `smoke-${Date.now()}`,
   });
 
-  console.log("Running live end-to-end smoke test...");
+  console.log(
+    `Running live end-to-end smoke test (chain: ${config.geminiModels.join(" -> ")})...`,
+  );
   const startedAt = Date.now();
   const { response, flushTelemetry } = await runTriagePipeline(lead, {
     enrich: (url) => enrichCompanyFromUrl(url),
-    triageWithLlm,
+    triageWithLlm: async (input) => {
+      const out = await baseLlm(input);
+      modelUsed = out.model;
+      fallbackAttempts = out.fallbackAttempts ?? [];
+      return out;
+    },
     repo: store,
     telemetry,
   });
@@ -58,6 +68,8 @@ async function main(): Promise<void> {
     JSON.stringify(
       {
         elapsed_ms: elapsedMs,
+        model_used: modelUsed,
+        fallback_attempts: fallbackAttempts,
         deduplicated: response.deduplicated,
         degraded: response.degraded,
         lead_id: response.lead.id,

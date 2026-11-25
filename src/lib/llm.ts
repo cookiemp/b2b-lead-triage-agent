@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type, type Schema } from "@google/genai";
-import { DEFAULT_GEMINI_MODEL } from "@/lib/config";
+import { DEFAULT_GEMINI_MODELS } from "@/lib/config";
 import type {
+  LlmFallbackAttempt,
   LlmTokenUsage,
   LlmTriageFn,
   LlmTriageInput,
@@ -12,22 +13,31 @@ import {
   URGENCIES,
 } from "@/lib/schemas";
 
-export const DEFAULT_LLM_TIMEOUT_MS = 10_000;
-const MAX_ATTEMPTS = 2;
+export const DEFAULT_LLM_TIMEOUT_MS = 8_000;
+const MAX_SCHEMA_ATTEMPTS_PER_MODEL = 2;
+
+export type LlmErrorCode =
+  | "TIMEOUT"
+  | "INVALID_OUTPUT"
+  | "PROVIDER_ERROR"
+  | "ALL_MODELS_FAILED";
 
 export class LlmTriageError extends Error {
-  readonly code: "TIMEOUT" | "INVALID_OUTPUT" | "PROVIDER_ERROR";
+  readonly code: LlmErrorCode;
   readonly attempts: number;
+  readonly fallbackAttempts: readonly LlmFallbackAttempt[];
 
   constructor(
-    code: "TIMEOUT" | "INVALID_OUTPUT" | "PROVIDER_ERROR",
+    code: LlmErrorCode,
     message: string,
     attempts: number,
+    fallbackAttempts: readonly LlmFallbackAttempt[] = [],
   ) {
     super(message);
     this.name = "LlmTriageError";
     this.code = code;
     this.attempts = attempts;
+    this.fallbackAttempts = fallbackAttempts;
   }
 }
 
@@ -49,6 +59,7 @@ export type RawLlmGenerateFn = (
 
 export interface GeminiClientOptions {
   readonly apiKey?: string;
+  readonly models?: readonly string[];
   readonly model?: string;
   readonly timeoutMs?: number;
   readonly generateContent?: RawLlmGenerateFn;
@@ -184,13 +195,17 @@ export function extractJsonPayload(rawText: string): unknown {
   return JSON.parse(candidate);
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  model: string,
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(
         new LlmTriageError(
           "TIMEOUT",
-          `Gemini triage timed out after ${timeoutMs}ms.`,
+          `Model ${model} timed out after ${timeoutMs}ms.`,
           1,
         ),
       );
@@ -207,6 +222,16 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
       },
     );
   });
+}
+
+function resolveModelChain(options: GeminiClientOptions): readonly string[] {
+  if (options.models && options.models.length > 0) {
+    return options.models;
+  }
+  if (options.model && options.model.trim().length > 0) {
+    return [options.model.trim()];
+  }
+  return [...DEFAULT_GEMINI_MODELS];
 }
 
 function createSdkGenerateFn(apiKey: string): RawLlmGenerateFn {
@@ -227,6 +252,7 @@ function createSdkGenerateFn(apiKey: string): RawLlmGenerateFn {
         },
       }),
       req.timeoutMs,
+      req.model,
     );
 
     const text = response.text ?? "";
@@ -246,13 +272,16 @@ function createSdkGenerateFn(apiKey: string): RawLlmGenerateFn {
 }
 
 /**
- * Creates a bounded Gemini Flash triage client that validates structured JSON output
- * against TriageResultSchema with at most 1 retry on JSON/schema error.
+ * Creates a resilient Gemini Flash triage client with a configurable model fallback chain.
+ * - Tries models in order with an explicit per-attempt timeout (default 8s).
+ * - Immediately falls back to the next model on transport/availability errors (429, 500, 503, 404, timeout).
+ * - Performs up to 1 JSON/Zod repair retry scoped to the responding model; if still invalid, falls back to the next model.
+ * - Throws a bounded LlmTriageError if all models fail (caught by pipeline.ts for fail-safe persistence).
  */
 export function createGeminiTriageClient(
   options: GeminiClientOptions,
 ): LlmTriageFn {
-  const model = options.model ?? DEFAULT_GEMINI_MODEL;
+  const modelChain = resolveModelChain(options);
   const timeoutMs = options.timeoutMs ?? DEFAULT_LLM_TIMEOUT_MS;
   const now = options.now ?? Date.now;
 
@@ -271,66 +300,102 @@ export function createGeminiTriageClient(
     input: LlmTriageInput,
   ): Promise<LlmTriageOutput> {
     const startedAt = now();
-    let retryFeedback: string | undefined;
-    let lastValidationMessage = "Unknown schema error";
+    let totalAttempts = 0;
+    const fallbackAttempts: LlmFallbackAttempt[] = [];
+    let lastErrorCode: LlmErrorCode = "PROVIDER_ERROR";
 
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-      const { systemInstruction, userPrompt } = buildTriagePrompts(
-        input,
-        retryFeedback,
-      );
+    for (const model of modelChain) {
+      let retryFeedback: string | undefined;
+      let modelFailureReason: string | null = null;
 
-      let rawResponse: RawLlmGenerateResponse;
-      try {
-        rawResponse = await withTimeout(
-          generateFn({
-            model,
-            systemInstruction,
-            userPrompt,
-            timeoutMs,
-          }),
-          timeoutMs,
+      for (
+        let schemaAttempt = 1;
+        schemaAttempt <= MAX_SCHEMA_ATTEMPTS_PER_MODEL;
+        schemaAttempt += 1
+      ) {
+        totalAttempts += 1;
+        const { systemInstruction, userPrompt } = buildTriagePrompts(
+          input,
+          retryFeedback,
         );
-      } catch (error: unknown) {
-        if (error instanceof LlmTriageError && error.code === "TIMEOUT") {
-          throw new LlmTriageError("TIMEOUT", error.message, attempt);
+
+        let rawResponse: RawLlmGenerateResponse;
+        try {
+          rawResponse = await withTimeout(
+            generateFn({
+              model,
+              systemInstruction,
+              userPrompt,
+              timeoutMs,
+            }),
+            timeoutMs,
+            model,
+          );
+        } catch (error: unknown) {
+          if (error instanceof LlmTriageError && error.code === "TIMEOUT") {
+            lastErrorCode = "TIMEOUT";
+            modelFailureReason = `timeout (${timeoutMs}ms)`;
+          } else {
+            lastErrorCode = "PROVIDER_ERROR";
+            modelFailureReason =
+              error instanceof Error ? error.message : "provider error";
+          }
+          // Transient/availability error: fall back immediately to next model in chain.
+          break;
         }
-        const message =
-          error instanceof Error ? error.message : "Provider request failed";
-        throw new LlmTriageError("PROVIDER_ERROR", message, attempt);
+
+        let parsedJson: unknown;
+        try {
+          parsedJson = extractJsonPayload(rawResponse.text);
+        } catch (error: unknown) {
+          lastErrorCode = "INVALID_OUTPUT";
+          const parseMessage =
+            error instanceof Error ? error.message : "Invalid JSON syntax";
+          modelFailureReason = `json_parse_error: ${parseMessage}`;
+          retryFeedback = `JSON parse error: ${parseMessage}`;
+          continue;
+        }
+
+        const validated = TriageResultSchema.safeParse(parsedJson);
+        if (validated.success) {
+          return {
+            result: validated.data,
+            model,
+            latencyMs: Math.max(0, now() - startedAt),
+            attempts: totalAttempts,
+            fallbackAttempts,
+            usage: rawResponse.usage,
+          };
+        }
+
+        lastErrorCode = "INVALID_OUTPUT";
+        const schemaIssues = validated.error.issues
+          .map((issue) => `${issue.path.join(".") || "root"}: ${issue.message}`)
+          .join("; ");
+        modelFailureReason = `schema_validation_error: ${schemaIssues}`;
+        retryFeedback = `Schema validation errors: ${schemaIssues}`;
       }
 
-      let parsedJson: unknown;
-      try {
-        parsedJson = extractJsonPayload(rawResponse.text);
-      } catch (error: unknown) {
-        lastValidationMessage =
-          error instanceof Error ? error.message : "Invalid JSON syntax";
-        retryFeedback = `JSON parse error: ${lastValidationMessage}`;
-        continue;
-      }
-
-      const validated = TriageResultSchema.safeParse(parsedJson);
-      if (validated.success) {
-        return {
-          result: validated.data,
+      if (modelFailureReason !== null) {
+        fallbackAttempts.push({
           model,
-          latencyMs: Math.max(0, now() - startedAt),
-          attempts: attempt,
-          usage: rawResponse.usage,
-        };
+          reason: modelFailureReason,
+        });
       }
-
-      lastValidationMessage = validated.error.issues
-        .map((issue) => `${issue.path.join(".") || "root"}: ${issue.message}`)
-        .join("; ");
-      retryFeedback = `Schema validation errors: ${lastValidationMessage}`;
     }
 
+    const summary = fallbackAttempts
+      .map((entry) => `${entry.model}: ${entry.reason}`)
+      .join(" | ");
+
+    const finalCode: LlmErrorCode =
+      modelChain.length === 1 ? lastErrorCode : "ALL_MODELS_FAILED";
+
     throw new LlmTriageError(
-      "INVALID_OUTPUT",
-      `Gemini returned invalid triage output after ${MAX_ATTEMPTS} attempts: ${lastValidationMessage}`,
-      MAX_ATTEMPTS,
+      finalCode,
+      `All configured Gemini models failed (${modelChain.join(" -> ")}): ${summary}`,
+      totalAttempts,
+      fallbackAttempts,
     );
   };
 }

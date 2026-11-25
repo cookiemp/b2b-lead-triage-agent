@@ -42,7 +42,7 @@ export function resolveLiveTriageRuntime(): {
 
   const cacheKey = [
     config.geminiApiKey,
-    config.geminiModel,
+    config.geminiModels.join(","),
     config.supabase.url,
     config.supabase.serviceRoleKey,
     config.langfuse?.publicKey ?? "",
@@ -61,7 +61,7 @@ export function resolveLiveTriageRuntime(): {
   const store = createSupabaseLeadStore(config.supabase);
   const triageWithLlm = createGeminiTriageClient({
     apiKey: config.geminiApiKey,
-    model: config.geminiModel,
+    models: config.geminiModels,
   });
   const telemetry = createLangfuseTelemetry(config.langfuse);
 

@@ -87,6 +87,9 @@ export function createLangfuseTelemetry(
             metadata: {
               latency_ms: output.latencyMs,
               attempts: output.attempts,
+              model_used: output.model,
+              used_fallback: (output.fallbackAttempts?.length ?? 0) > 0,
+              fallback_attempts: output.fallbackAttempts ?? [],
             },
           });
         },

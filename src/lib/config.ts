@@ -1,6 +1,12 @@
 import { z } from "zod";
 
-export const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
+export const DEFAULT_GEMINI_MODELS = [
+  "gemini-3.8-flash",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash-lite",
+] as const;
+
+export const DEFAULT_GEMINI_MODEL = DEFAULT_GEMINI_MODELS[0];
 export const DEFAULT_LANGFUSE_BASE_URL = "https://cloud.langfuse.com";
 export const DEFAULT_DEMO_DAILY_CAP = 100;
 
@@ -41,6 +47,7 @@ const LangfuseEnvSchema = z.object({
 
 const LiveTriageEnvSchema = SupabaseEnvSchema.extend({
   GEMINI_API_KEY: z.string().trim().min(1),
+  GEMINI_MODELS: OptionalNonEmptyString,
   GEMINI_MODEL: OptionalNonEmptyString,
 });
 
@@ -58,9 +65,35 @@ export interface LangfuseConfig {
 
 export interface LiveTriageConfig {
   readonly geminiApiKey: string;
-  readonly geminiModel: string;
+  readonly geminiModels: readonly [string, ...string[]];
   readonly supabase: SupabaseConfig;
   readonly langfuse: LangfuseConfig | null;
+}
+
+/**
+ * Parses a comma-separated GEMINI_MODELS list (falling back to single GEMINI_MODEL
+ * or DEFAULT_GEMINI_MODELS), trimming whitespace and deduplicating while preserving order.
+ */
+export function parseGeminiModelChain(
+  rawModels: string | undefined,
+  legacySingleModel?: string,
+): readonly [string, ...string[]] {
+  const source = rawModels ?? legacySingleModel;
+  if (source) {
+    const parsed = Array.from(
+      new Set(
+        source
+          .split(",")
+          .map((item) => item.trim())
+          .filter((item) => item.length > 0),
+      ),
+    );
+    const [first, ...rest] = parsed;
+    if (first !== undefined) {
+      return [first, ...rest];
+    }
+  }
+  return [...DEFAULT_GEMINI_MODELS];
 }
 
 export function loadSupabaseConfig(
@@ -101,7 +134,10 @@ export function loadLiveTriageConfig(
 
   return {
     geminiApiKey: parsed.data.GEMINI_API_KEY,
-    geminiModel: parsed.data.GEMINI_MODEL ?? DEFAULT_GEMINI_MODEL,
+    geminiModels: parseGeminiModelChain(
+      parsed.data.GEMINI_MODELS,
+      parsed.data.GEMINI_MODEL,
+    ),
     supabase: {
       url: parsed.data.SUPABASE_URL,
       serviceRoleKey: parsed.data.SUPABASE_SERVICE_ROLE_KEY,

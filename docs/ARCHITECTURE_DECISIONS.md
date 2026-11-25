@@ -43,3 +43,10 @@ Concise record of the key production, security, and tradeoff decisions in this r
 - **In-Memory Fixed-Window Rate Limiter:** `createInMemoryRateLimiter` protects individual warm Vercel instances and is unit-tested offline, but is explicitly documented as best-effort per instance (not globally distributed). Phase 2 adds an optional Supabase-backed daily demo quota cap to protect free-tier Gemini limits.
 - **URL Hygiene (`isSafePublicHttpUrl`):** Because Jina Reader (`r.jina.ai`) performs the outbound HTTP fetch rather than our Next.js server, URL validation primarily provides input hygiene and prevents forwarding internal/private addresses to Jina rather than acting as a DNS-resolving server-side SSRF firewall.
 - **Dependencies:** Upgraded Zod to `^4.6.7` to clear the Zod memory-exhaustion advisory. Remaining on Next.js 15 (`15.5.x`) for stability; the nested `postcss` advisory applies only to build-time CSS compilation of our own static stylesheets, not untrusted runtime input.
+
+---
+
+## ADR-007: Configurable Gemini Flash Model Fallback Chain
+- **Context:** Free-tier and high-demand flagship models periodically return `503 UNAVAILABLE` or `429` spikes. Pinning a single model turns transient provider load spikes into degraded runs.
+- **Decision:** Configure an ordered fallback chain (`GEMINI_MODELS`, defaulting to `gemini-3.8-flash -> gemini-3.6-flash -> gemini-3.5-flash-lite`) with an `8s` per-attempt timeout (staying inside Vercel's `maxDuration = 30`). Transient/availability failures immediately advance to the next model; JSON/Zod validation failures get 1 bounded repair retry on the responding model before falling back. Exact `model_used` and `fallback_attempts` are logged to Langfuse.
+- **Proven Live:** On the very first live smoke test (`10ab10e7-9518-4b17-a265-7120b1615952`), `gemini-3.8-flash` returned HTTP `503 UNAVAILABLE` and the chain automatically recovered via `gemini-3.6-flash` without dropping the lead.
