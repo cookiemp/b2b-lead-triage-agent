@@ -1,5 +1,7 @@
 # B2B Inbound Lead Triage & Enrichment Agent
 
+**Live Demo:** [Operations Inbox](https://b2b-lead-triage-agent.vercel.app) · [Public Intake Form](https://b2b-lead-triage-agent.vercel.app/submit)
+
 A production-oriented B2B AI Operations workflow built on a **\$0/month stack** (Next.js 15 App Router, TypeScript, Zod v4, Jina Reader, Google Gemini Flash, Supabase PostgreSQL, and Langfuse OpenTelemetry).
 
 It ingests messy inbound B2B inquiries, enriches the prospect's domain, classifies intent and ICP fit with structured JSON guardrails, auto-routes high-confidence leads, auto-rejects high-confidence spam, and pauses ambiguous, degraded, or adversarial leads in a **Human Approval Queue** without ever dropping an inbound lead.
