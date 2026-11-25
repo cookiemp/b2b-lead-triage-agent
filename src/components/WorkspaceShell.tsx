@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   Clock,
@@ -46,6 +46,7 @@ export function WorkspaceShell() {
   const [lastRunMeta, setLastRunMeta] = useState<TriagePipelineResponse | null>(
     null,
   );
+  const listContainerRef = useRef<HTMLDivElement | null>(null);
 
   const loadLeads = useCallback(async (focusId?: string) => {
     setLoading(true);
@@ -156,6 +157,15 @@ export function WorkspaceShell() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [filteredLeads, selectedLead?.id, simulatorOpen]);
+
+  // Keep keyboard-selected lead row scrolled into view
+  useEffect(() => {
+    if (!selectedLead?.id || !listContainerRef.current) return;
+    const activeRow = listContainerRef.current.querySelector<HTMLElement>(
+      `[data-lead-id="${CSS.escape(selectedLead.id)}"]`,
+    );
+    activeRow?.scrollIntoView({ block: "nearest" });
+  }, [selectedLead?.id]);
 
   async function handleLeadTriaged(
     result: TriagePipelineResponse,
@@ -295,7 +305,10 @@ export function WorkspaceShell() {
           </div>
         )}
 
-        <div className="min-h-0 flex-1 divide-y divide-[#f1f1f4] overflow-y-auto">
+        <div
+          ref={listContainerRef}
+          className="min-h-0 flex-1 divide-y divide-[#f1f1f4] overflow-y-auto"
+        >
           {loading && leads.length === 0 ? (
             <div className="flex items-center justify-center py-12 text-xs text-[#71717a]">
               <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
@@ -318,6 +331,7 @@ export function WorkspaceShell() {
                 <button
                   key={lead.id}
                   type="button"
+                  data-lead-id={lead.id}
                   onClick={() => setSelectedId(lead.id)}
                   className={`relative block w-full cursor-pointer px-4 py-3 text-left transition-colors ${
                     isSelected
