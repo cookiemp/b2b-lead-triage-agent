@@ -1,1 +1,28 @@
 @import "tailwindcss";
+
+:root {
+  --bg-canvas: #fafaf8;
+  --bg-surface: #ffffff;
+  --bg-subtle: #f4f3ef;
+  --border-subtle: #e7e5e0;
+  --border-strong: #d6d3cc;
+  --ink-primary: #171614;
+  --ink-secondary: #57534e;
+  --ink-muted: #78716c;
+  --status-success: #166534;
+  --status-warning: #b45309;
+  --status-danger: #991b1b;
+}
+
+@theme inline {
+  --font-sans: var(--font-plus-jakarta-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-newsreader), ui-serif, Georgia, serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, monospace;
+}
+
+body {
+  background-color: var(--bg-canvas);
+  color: var(--ink-primary);
+  font-family: var(--font-sans);
+  text-rendering: optimizeLegibility;
+}
