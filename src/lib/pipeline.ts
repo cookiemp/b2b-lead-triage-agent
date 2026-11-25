@@ -47,6 +47,8 @@ export interface CreateLeadInput {
   readonly triage: TriageResult | null;
   readonly routing: RoutingDecision;
   readonly langfuse_trace_id: string | null;
+  readonly model_used?: string | null;
+  readonly fallback_attempts?: readonly LlmFallbackAttempt[];
 }
 
 export interface LeadRepository {
@@ -98,6 +100,8 @@ export type TriagePipelineResponse =
       readonly routing_reason: RoutingReason;
       readonly prompt_injection: CombinedPromptInjectionScanResult;
       readonly email_domain: EmailDomainClass;
+      readonly model_used: string | null;
+      readonly fallback_attempts: readonly LlmFallbackAttempt[];
     };
 
 export interface TriagePipelineExecution {
@@ -187,10 +191,14 @@ export async function runTriagePipeline(
     };
 
     let triage: TriageResult | null = null;
+    let modelUsed: string | null = null;
+    let fallbackAttempts: readonly LlmFallbackAttempt[] = [];
     try {
       const llmOutput = await deps.triageWithLlm(llmInput);
       trace.recordGeneration(llmInput, llmOutput);
       triage = llmOutput.result;
+      modelUsed = llmOutput.model;
+      fallbackAttempts = llmOutput.fallbackAttempts ?? [];
     } catch (llmError: unknown) {
       // Fail-safe persistence: record error and degrade to human review instead of losing the lead.
       trace.recordError("llm_triage", llmError);
@@ -214,6 +222,8 @@ export async function runTriagePipeline(
       triage,
       routing,
       langfuse_trace_id: trace.id,
+      model_used: modelUsed,
+      fallback_attempts: fallbackAttempts,
     });
 
     const degraded = triage === null;
@@ -224,6 +234,8 @@ export async function runTriagePipeline(
       lead_id: savedLead.id,
       status: savedLead.status,
       routing_reason: routing.reason,
+      model_used: modelUsed,
+      fallback_count: fallbackAttempts.length,
       enrichment_ok: enrichment.ok,
       prompt_injection_detected: promptInjection.detected,
       prompt_injection_source: promptInjection.source,
@@ -239,6 +251,8 @@ export async function runTriagePipeline(
         routing_reason: routing.reason,
         prompt_injection: promptInjection,
         email_domain: emailDomain,
+        model_used: modelUsed,
+        fallback_attempts: fallbackAttempts,
       },
       flushTelemetry,
     };

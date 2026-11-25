@@ -27,7 +27,7 @@ export interface EnrichmentOptions {
   readonly now?: () => number;
 }
 
-const DEFAULT_TIMEOUT_MS = 4500;
+const DEFAULT_TIMEOUT_MS = 5500;
 const DEFAULT_MAX_CHARS = 4000;
 const DEFAULT_JINA_BASE_URL = "https://r.jina.ai/";
 

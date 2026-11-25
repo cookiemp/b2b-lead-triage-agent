@@ -126,6 +126,8 @@ export function createSupabaseLeadStore(config: SupabaseConfig): LeadStore {
         prompt_injection_detected: input.prompt_injection.detected,
         prompt_injection_source: input.prompt_injection.source,
         matched_patterns: [...input.prompt_injection.matchedPatterns],
+        model_used: input.model_used ?? null,
+        fallback_attempts: input.fallback_attempts ?? [],
         langfuse_trace_id: input.langfuse_trace_id,
       },
     });

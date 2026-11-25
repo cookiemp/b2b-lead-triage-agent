@@ -155,6 +155,8 @@ describe("POST /api/triage integration (mocked external calls)", () => {
     const body = await res.json();
     expect(body.deduplicated).toBe(false);
     expect(body.degraded).toBe(false);
+    expect(body.model_used).toBe("gemini-2.0-flash");
+    expect(body.fallback_attempts).toEqual([]);
     expect(body.lead.status).toBe("auto_routed");
     expect(body.routing_reason).toBe("high_confidence_verified");
     expect(body.enrichment.ok).toBe(true);

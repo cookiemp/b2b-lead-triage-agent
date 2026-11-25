@@ -1,4 +1,4 @@
-import { Langfuse } from "langfuse";
+import { randomBytes } from "node:crypto";
 import type { LangfuseConfig } from "@/lib/config";
 import type { EnrichmentOutcome } from "@/lib/enrichment";
 import {
@@ -11,54 +11,145 @@ import {
 import type { RoutingDecision } from "@/lib/router";
 import type { CombinedPromptInjectionScanResult } from "@/lib/security";
 
+const OTLP_FLUSH_TIMEOUT_MS = 5000;
+
+type OtlpAnyValue =
+  | { readonly stringValue: string }
+  | { readonly intValue: string }
+  | { readonly boolValue: boolean }
+  | { readonly arrayValue: { readonly values: readonly OtlpAnyValue[] } };
+
+interface OtlpKeyValue {
+  readonly key: string;
+  readonly value: OtlpAnyValue;
+}
+
+interface OtlpSpan {
+  readonly traceId: string;
+  readonly spanId: string;
+  readonly parentSpanId?: string;
+  readonly name: string;
+  readonly kind: number;
+  readonly startTimeUnixNano: string;
+  readonly endTimeUnixNano: string;
+  readonly attributes: OtlpKeyValue[];
+  readonly status?: { readonly code: number; readonly message?: string };
+}
+
+export interface LangfuseTelemetryOptions {
+  readonly fetchFn?: typeof fetch;
+  readonly timeoutMs?: number;
+  readonly now?: () => number;
+}
+
+function generateHexId(byteLength: number): string {
+  return randomBytes(byteLength).toString("hex");
+}
+
+function msToUnixNano(ms: number): string {
+  return (BigInt(Math.max(0, Math.trunc(ms))) * 1_000_000n).toString();
+}
+
+function strAttr(key: string, value: string): OtlpKeyValue {
+  return { key, value: { stringValue: value } };
+}
+
+function intAttr(key: string, value: number): OtlpKeyValue {
+  return { key, value: { intValue: String(Math.trunc(value)) } };
+}
+
+function boolAttr(key: string, value: boolean): OtlpKeyValue {
+  return { key, value: { boolValue: value } };
+}
+
+function strArrayAttr(key: string, values: readonly string[]): OtlpKeyValue {
+  return {
+    key,
+    value: {
+      arrayValue: {
+        values: values.map((v) => ({ stringValue: v })),
+      },
+    },
+  };
+}
+
 /**
- * Langfuse observability adapter.
- * Uses flushAt: 1 and exposes flush() -> langfuse.flushAsync() so Vercel serverless
- * functions (via next/server after()) never lose traces when the lambda freezes.
- * Falls back safely to a no-op tracer when Langfuse credentials are not configured.
+ * Langfuse OpenTelemetry (OTLP/JSON) observability adapter.
+ * Targets `POST /api/public/otel/v1/traces` (required on Langfuse Cloud after the
+ * November 16, 2026 shutdown of the legacy v3 `/api/public/ingestion` API).
+ * Zero external SDK dependencies; flushes deterministically in one HTTP call via Next.js `after()`.
  */
 export function createLangfuseTelemetry(
   config: LangfuseConfig | null,
+  options: LangfuseTelemetryOptions = {},
 ): PipelineTelemetry {
   if (config === null) {
     return createNoopTelemetry();
   }
 
-  const client = new Langfuse({
-    publicKey: config.publicKey,
-    secretKey: config.secretKey,
-    baseUrl: config.baseUrl,
-    flushAt: 1,
-  });
+  const fetchFn = options.fetchFn ?? fetch;
+  const timeoutMs = options.timeoutMs ?? OTLP_FLUSH_TIMEOUT_MS;
+  const now = options.now ?? Date.now;
+
+  const endpoint = `${config.baseUrl.replace(/\/$/, "")}/api/public/otel/v1/traces`;
+  const authHeader = `Basic ${Buffer.from(
+    `${config.publicKey}:${config.secretKey}`,
+    "utf8",
+  ).toString("base64")}`;
 
   return {
     startTrace(params): PipelineTraceHandle {
-      const trace = client.trace({
-        name: params.name,
-        input: params.input,
-        tags: params.tags ? [...params.tags] : undefined,
-      });
+      const traceId = generateHexId(16);
+      const rootSpanId = generateHexId(8);
+      const traceStartMs = now();
+      const childSpans: OtlpSpan[] = [];
+      let traceOutput: Record<string, unknown> | null = null;
+      let hasError = false;
+      let flushed = false;
+
+      const rootAttributes: OtlpKeyValue[] = [
+        strAttr("langfuse.trace.name", params.name),
+        strAttr("langfuse.trace.input", JSON.stringify(params.input)),
+      ];
+      if (params.tags && params.tags.length > 0) {
+        rootAttributes.push(strArrayAttr("langfuse.trace.tags", params.tags));
+      }
 
       return {
-        id: trace.id,
+        id: traceId,
 
         recordEnrichment(outcome: EnrichmentOutcome, companyUrl: string): void {
-          trace.span({
+          const endMs = now();
+          const startMs = Math.max(traceStartMs, endMs - outcome.durationMs);
+          const outputPayload = outcome.ok
+            ? { ok: true, summary_chars: outcome.summary.length }
+            : {
+                ok: false,
+                reason: outcome.reason,
+                http_status: outcome.httpStatus,
+              };
+
+          childSpans.push({
+            traceId,
+            spanId: generateHexId(8),
+            parentSpanId: rootSpanId,
             name: "jina_enrichment",
-            input: { company_url: companyUrl },
-            output: outcome.ok
-              ? {
-                  ok: true,
-                  summary_chars: outcome.summary.length,
-                }
-              : {
-                  ok: false,
-                  reason: outcome.reason,
-                  http_status: outcome.httpStatus,
-                },
-            metadata: {
-              duration_ms: outcome.durationMs,
-            },
+            kind: 3, // CLIENT
+            startTimeUnixNano: msToUnixNano(startMs),
+            endTimeUnixNano: msToUnixNano(endMs),
+            attributes: [
+              strAttr("langfuse.observation.type", "span"),
+              strAttr(
+                "langfuse.observation.input",
+                JSON.stringify({ company_url: companyUrl }),
+              ),
+              strAttr(
+                "langfuse.observation.output",
+                JSON.stringify(outputPayload),
+              ),
+              intAttr("langfuse.observation.metadata.duration_ms", outcome.durationMs),
+            ],
+            status: outcome.ok ? { code: 1 } : { code: 2, message: outcome.reason },
           });
         },
 
@@ -66,31 +157,62 @@ export function createLangfuseTelemetry(
           input: LlmTriageInput,
           output: LlmTriageOutput,
         ): void {
-          trace.generation({
+          const endMs = now();
+          const startMs = Math.max(traceStartMs, endMs - output.latencyMs);
+          const attrs: OtlpKeyValue[] = [
+            strAttr("langfuse.observation.type", "generation"),
+            strAttr("langfuse.observation.model.name", output.model),
+            strAttr("gen_ai.system", "google_genai"),
+            strAttr("gen_ai.request.model", output.model),
+            strAttr("gen_ai.response.model", output.model),
+            strAttr(
+              "langfuse.observation.input",
+              JSON.stringify({
+                source: input.lead.source,
+                company_url: input.lead.company_url,
+                email_domain: input.emailDomain,
+                enrichment_ok: input.enrichment.ok,
+                prompt_injection_detected: input.promptInjection.detected,
+              }),
+            ),
+            strAttr("langfuse.observation.output", JSON.stringify(output.result)),
+            intAttr("langfuse.observation.metadata.latency_ms", output.latencyMs),
+            intAttr("langfuse.observation.metadata.attempts", output.attempts),
+            strAttr("langfuse.observation.metadata.model_used", output.model),
+            boolAttr(
+              "langfuse.observation.metadata.used_fallback",
+              (output.fallbackAttempts?.length ?? 0) > 0,
+            ),
+            strAttr(
+              "langfuse.observation.metadata.fallback_attempts",
+              JSON.stringify(output.fallbackAttempts ?? []),
+            ),
+          ];
+
+          if (output.usage?.promptTokens !== undefined) {
+            attrs.push(
+              intAttr("gen_ai.usage.input_tokens", output.usage.promptTokens),
+            );
+          }
+          if (output.usage?.completionTokens !== undefined) {
+            attrs.push(
+              intAttr(
+                "gen_ai.usage.output_tokens",
+                output.usage.completionTokens,
+              ),
+            );
+          }
+
+          childSpans.push({
+            traceId,
+            spanId: generateHexId(8),
+            parentSpanId: rootSpanId,
             name: "gemini_lead_triage",
-            model: output.model,
-            input: {
-              source: input.lead.source,
-              company_url: input.lead.company_url,
-              email_domain: input.emailDomain,
-              enrichment_ok: input.enrichment.ok,
-              prompt_injection_detected: input.promptInjection.detected,
-            },
-            output: output.result,
-            usage: output.usage
-              ? {
-                  input: output.usage.promptTokens,
-                  output: output.usage.completionTokens,
-                  total: output.usage.totalTokens,
-                }
-              : undefined,
-            metadata: {
-              latency_ms: output.latencyMs,
-              attempts: output.attempts,
-              model_used: output.model,
-              used_fallback: (output.fallbackAttempts?.length ?? 0) > 0,
-              fallback_attempts: output.fallbackAttempts ?? [],
-            },
+            kind: 3, // CLIENT
+            startTimeUnixNano: msToUnixNano(startMs),
+            endTimeUnixNano: msToUnixNano(endMs),
+            attributes: attrs,
+            status: { code: 1 },
           });
         },
 
@@ -98,35 +220,133 @@ export function createLangfuseTelemetry(
           decision: RoutingDecision,
           promptInjection: CombinedPromptInjectionScanResult,
         ): void {
-          trace.event({
+          const ts = now();
+          childSpans.push({
+            traceId,
+            spanId: generateHexId(8),
+            parentSpanId: rootSpanId,
             name: "deterministic_routing",
-            output: {
-              status: decision.status,
-              reason: decision.reason,
-              suggested_route: decision.suggestedRoute,
-              prompt_injection_detected: promptInjection.detected,
-              prompt_injection_source: promptInjection.source,
-            },
+            kind: 1,
+            startTimeUnixNano: msToUnixNano(ts),
+            endTimeUnixNano: msToUnixNano(ts),
+            attributes: [
+              strAttr("langfuse.observation.type", "event"),
+              strAttr(
+                "langfuse.observation.output",
+                JSON.stringify({
+                  status: decision.status,
+                  reason: decision.reason,
+                  suggested_route: decision.suggestedRoute,
+                  prompt_injection_detected: promptInjection.detected,
+                  prompt_injection_source: promptInjection.source,
+                }),
+              ),
+            ],
+            status: { code: 1 },
           });
         },
 
         recordError(stage: string, error: unknown): void {
-          trace.event({
+          hasError = true;
+          const ts = now();
+          const message =
+            error instanceof Error ? error.message : String(error);
+          childSpans.push({
+            traceId,
+            spanId: generateHexId(8),
+            parentSpanId: rootSpanId,
             name: `error_${stage}`,
-            level: "ERROR",
-            output: {
-              stage,
-              message: error instanceof Error ? error.message : String(error),
-            },
+            kind: 1,
+            startTimeUnixNano: msToUnixNano(ts),
+            endTimeUnixNano: msToUnixNano(ts),
+            attributes: [
+              strAttr("langfuse.observation.type", "event"),
+              strAttr("langfuse.observation.level", "ERROR"),
+              strAttr(
+                "langfuse.observation.output",
+                JSON.stringify({ stage, message }),
+              ),
+            ],
+            status: { code: 2, message },
           });
         },
 
         finish(output: Record<string, unknown>): void {
-          trace.update({ output });
+          traceOutput = output;
         },
 
         async flush(): Promise<void> {
-          await client.flushAsync();
+          if (flushed) {
+            return;
+          }
+          flushed = true;
+
+          const traceEndMs = Math.max(traceStartMs, now());
+          const finalRootAttrs = [...rootAttributes];
+          if (traceOutput !== null) {
+            finalRootAttrs.push(
+              strAttr("langfuse.trace.output", JSON.stringify(traceOutput)),
+            );
+          }
+
+          const rootSpan: OtlpSpan = {
+            traceId,
+            spanId: rootSpanId,
+            name: params.name,
+            kind: 1, // INTERNAL
+            startTimeUnixNano: msToUnixNano(traceStartMs),
+            endTimeUnixNano: msToUnixNano(traceEndMs),
+            attributes: finalRootAttrs,
+            status: hasError ? { code: 2, message: "pipeline_degraded_or_error" } : { code: 1 },
+          };
+
+          const payload = {
+            resourceSpans: [
+              {
+                resource: {
+                  attributes: [
+                    strAttr("service.name", "b2b-lead-triage-agent"),
+                  ],
+                },
+                scopeSpans: [
+                  {
+                    scope: {
+                      name: "b2b-lead-triage-agent.observability",
+                      version: "1.0.0",
+                    },
+                    spans: [rootSpan, ...childSpans],
+                  },
+                ],
+              },
+            ],
+          };
+
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), timeoutMs);
+          try {
+            const response = await fetchFn(endpoint, {
+              method: "POST",
+              headers: {
+                Authorization: authHeader,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(payload),
+              signal: controller.signal,
+            });
+            if (!response.ok) {
+              // Observability must never crash lead triage; surface status only to stderr.
+              console.error(
+                `Langfuse OTLP flush failed with HTTP ${response.status}`,
+              );
+            }
+          } catch (error: unknown) {
+            console.error(
+              "Langfuse OTLP flush error:",
+              error instanceof Error ? error.message : String(error),
+            );
+          } finally {
+            clearTimeout(timer);
+          }
         },
       };
     },

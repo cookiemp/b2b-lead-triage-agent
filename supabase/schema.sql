@@ -42,6 +42,10 @@ create table if not exists public.audit_logs (
 create index if not exists idx_leads_status_created_at
   on public.leads (status, created_at desc);
 
+create index if not exists idx_leads_web_demo_created_at
+  on public.leads (created_at desc)
+  where source = 'web_demo';
+
 create index if not exists idx_audit_logs_lead_id_created_at
   on public.audit_logs (lead_id, created_at desc);
 

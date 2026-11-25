@@ -50,3 +50,10 @@ Concise record of the key production, security, and tradeoff decisions in this r
 - **Context:** Free-tier and high-demand flagship models periodically return `503 UNAVAILABLE` or `429` spikes. Pinning a single model turns transient provider load spikes into degraded runs.
 - **Decision:** Configure an ordered fallback chain (`GEMINI_MODELS`, defaulting to `gemini-3.8-flash -> gemini-3.6-flash -> gemini-3.5-flash-lite`) with an `8s` per-attempt timeout (staying inside Vercel's `maxDuration = 30`). Transient/availability failures immediately advance to the next model; JSON/Zod validation failures get 1 bounded repair retry on the responding model before falling back. Exact `model_used` and `fallback_attempts` are logged to Langfuse.
 - **Proven Live:** On the very first live smoke test (`10ab10e7-9518-4b17-a265-7120b1615952`), `gemini-3.8-flash` returned HTTP `503 UNAVAILABLE` and the chain automatically recovered via `gemini-3.6-flash` without dropping the lead.
+
+---
+
+## ADR-008: Dependency-Free Langfuse OTLP/JSON Exporter (Post-Nov 16, 2026 v3 Shutdown)
+- **Context:** Live verification of Phase 2 via `GET /api/public/v2/observations` revealed that `langfuse@3.39.2` silently failed with `HTTP 410 GONE` because Langfuse Cloud shut down the legacy v3 `/api/public/ingestion` endpoint on November 16, 2026.
+- **Decision:** Replace the `langfuse` v3 SDK in `src/lib/observability.ts` with a dependency-free OpenTelemetry OTLP/JSON exporter targeting `POST ${baseUrl}/api/public/otel/v1/traces` with `gen_ai.*` and `langfuse.*` attributes, a `5s` abort timeout, and deterministic single-POST flushing via Next.js `after()`.
+- **Consequence:** Traces, spans, Gemini generation model/token usage, and fallback metadata land reliably in Langfuse Cloud v4 with zero heavy OTel SDK bundle overhead.

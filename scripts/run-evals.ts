@@ -104,6 +104,8 @@ async function main(): Promise<void> {
   }
 
   const useLiveEnrichment = process.argv.includes("--live-enrichment");
+  const delayArg = process.argv.find((arg) => arg.startsWith("--delay-ms="));
+  const delayMs = delayArg ? Math.max(0, Number(delayArg.split("=")[1]) || 0) : 400;
   const models = parseGeminiModelChain(
     process.env.GEMINI_MODELS,
     process.env.GEMINI_MODEL,
@@ -203,6 +205,10 @@ async function main(): Promise<void> {
     console.log(
       `[${mark}] ${item.id} (${item.group}) expected=${item.expected_status} actual=${actualStatus} reason=${response.routing_reason} (${elapsedMs}ms)`,
     );
+
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
   }
 
   const totalCostUsd =
