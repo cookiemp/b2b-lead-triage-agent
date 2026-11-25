@@ -1,7 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowUpRight,
   CheckCircle2,
   Clock,
   Inbox,
@@ -251,14 +253,23 @@ export function WorkspaceShell() {
           })}
         </nav>
 
-        <div className="hidden border-t border-[#ececef] px-4 py-3 text-[11px] text-[#71717a] lg:block">
-          <div className="flex items-center justify-between">
-            <span>Navigate</span>
-            <span className="font-mono text-[10px]">J / K</span>
-          </div>
-          <div className="mt-1 flex items-center justify-between">
-            <span>New lead</span>
-            <span className="font-mono text-[10px]">N</span>
+        <div className="hidden border-t border-[#ececef] px-3 py-3 text-[11px] text-[#71717a] lg:block">
+          <Link
+            href="/submit"
+            className="mb-2.5 flex items-center justify-between rounded-md px-2 py-1.5 text-xs font-medium text-[#52525b] transition-colors hover:bg-[#f1f1f4] hover:text-[#111113]"
+          >
+            <span>Public intake form</span>
+            <ArrowUpRight className="h-3.5 w-3.5 text-[#71717a]" />
+          </Link>
+          <div className="space-y-1 px-2">
+            <div className="flex items-center justify-between">
+              <span>Navigate</span>
+              <span className="font-mono text-[10px]">J / K</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>New lead</span>
+              <span className="font-mono text-[10px]">N</span>
+            </div>
           </div>
         </div>
       </aside>
