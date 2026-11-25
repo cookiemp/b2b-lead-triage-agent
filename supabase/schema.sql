@@ -45,9 +45,14 @@ create index if not exists idx_leads_status_created_at
 create index if not exists idx_audit_logs_lead_id_created_at
   on public.audit_logs (lead_id, created_at desc);
 
+-- Enable RLS with no anon/authenticated policies: only server-side service_role access is permitted.
+alter table public.leads enable row level security;
+alter table public.audit_logs enable row level security;
+
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
+set search_path = ''
 as $$
 begin
   new.updated_at = now();
