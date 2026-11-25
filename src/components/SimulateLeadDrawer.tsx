@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { AlertTriangle, Loader2, Send, X } from "lucide-react";
+import { AlertTriangle, Loader2, X } from "lucide-react";
 import type { TriagePipelineResponse } from "@/lib/pipeline";
 import {
   createDemoRunNonce,
@@ -125,7 +125,7 @@ export function SimulateLeadDrawer({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex justify-end bg-[#111113]/25 backdrop-blur-[1px]"
+      className="fixed inset-0 z-50 flex justify-end bg-[#111113]/20"
       onClick={(e) => {
         if (e.target === e.currentTarget && !submitting) onClose();
       }}
@@ -133,19 +133,19 @@ export function SimulateLeadDrawer({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Simulate Inbound Lead"
-        className="flex h-full w-full max-w-[460px] flex-col border-l border-[#e8e8ec] bg-[#ffffff] shadow-xl"
+        aria-label="New inbound lead"
+        className="flex h-full w-full max-w-[440px] flex-col border-l border-[#e4e4e7] bg-[#ffffff] shadow-2xl"
       >
-        <div className="flex h-12 shrink-0 items-center justify-between border-b border-[#e8e8ec] px-5">
+        <div className="flex h-12 shrink-0 items-center justify-between border-b border-[#ececef] px-5">
           <h2 className="text-sm font-semibold text-[#111113]">
-            Simulate Inbound Lead
+            New inbound lead
           </h2>
           <button
             type="button"
             disabled={submitting}
             onClick={onClose}
             className="cursor-pointer rounded p-1 text-[#71717a] hover:bg-[#f4f4f6] hover:text-[#111113]"
-            aria-label="Close drawer"
+            aria-label="Close"
           >
             <X className="h-4 w-4" />
           </button>
@@ -155,14 +155,14 @@ export function SimulateLeadDrawer({
           onSubmit={handleSubmit}
           className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-5"
         >
-          {/* Presets */}
+          {/* Examples */}
           <div>
             <div className="flex items-baseline justify-between">
-              <span className="text-[11px] font-medium tracking-wide text-[#71717a] uppercase">
-                One-Click Presets
+              <span className="text-xs font-medium text-[#71717a]">
+                Examples
               </span>
               {activePreset && (
-                <span className="text-[11px] text-[#52525b]">
+                <span className="text-[11px] text-[#71717a]">
                   {activePreset.expectedOutcome}
                 </span>
               )}
@@ -175,10 +175,10 @@ export function SimulateLeadDrawer({
                     key={preset.id}
                     type="button"
                     onClick={() => applyPreset(preset)}
-                    className={`cursor-pointer rounded border px-2.5 py-2 text-left text-xs font-medium transition-colors ${
+                    className={`cursor-pointer rounded-md border px-2.5 py-1.5 text-left text-xs font-medium transition-colors ${
                       isActive
                         ? "border-[#111113] bg-[#111113] text-[#ffffff]"
-                        : "border-[#e8e8ec] bg-[#f8f8f9] text-[#111113] hover:border-[#d4d4dc] hover:bg-[#f4f4f6]"
+                        : "border-[#e4e4e7] bg-[#ffffff] text-[#18181b] hover:bg-[#f4f4f6]"
                     }`}
                   >
                     {preset.label}
@@ -188,14 +188,14 @@ export function SimulateLeadDrawer({
             </div>
           </div>
 
-          {/* Inputs */}
-          <div className="mt-5 space-y-3.5">
+          {/* Fields */}
+          <div className="mt-5 space-y-4">
             <div>
               <label
                 htmlFor="sim-name"
                 className="block text-xs font-medium text-[#52525b]"
               >
-                Full Name
+                Name
               </label>
               <input
                 id="sim-name"
@@ -203,7 +203,7 @@ export function SimulateLeadDrawer({
                 required
                 value={form.name}
                 onChange={(e) => updateField("name", e.target.value)}
-                className="mt-1 w-full rounded-md border border-[#e8e8ec] bg-[#ffffff] px-3 py-2 text-sm text-[#111113] outline-none focus:border-[#111113]"
+                className="mt-1.5 w-full rounded-md border border-[#e4e4e7] bg-[#ffffff] px-3 py-2 text-sm text-[#111113] outline-none transition-colors focus:border-[#111113]"
               />
             </div>
 
@@ -212,7 +212,7 @@ export function SimulateLeadDrawer({
                 htmlFor="sim-email"
                 className="block text-xs font-medium text-[#52525b]"
               >
-                Work Email
+                Email
               </label>
               <input
                 id="sim-email"
@@ -220,7 +220,7 @@ export function SimulateLeadDrawer({
                 required
                 value={form.email}
                 onChange={(e) => updateField("email", e.target.value)}
-                className="mt-1 w-full rounded-md border border-[#e8e8ec] bg-[#ffffff] px-3 py-2 text-sm text-[#111113] outline-none focus:border-[#111113]"
+                className="mt-1.5 w-full rounded-md border border-[#e4e4e7] bg-[#ffffff] px-3 py-2 text-sm text-[#111113] outline-none transition-colors focus:border-[#111113]"
               />
             </div>
 
@@ -237,7 +237,7 @@ export function SimulateLeadDrawer({
                 required
                 value={form.company_url}
                 onChange={(e) => updateField("company_url", e.target.value)}
-                className="mt-1 w-full rounded-md border border-[#e8e8ec] bg-[#ffffff] px-3 py-2 font-mono text-xs text-[#111113] outline-none focus:border-[#111113]"
+                className="mt-1.5 w-full rounded-md border border-[#e4e4e7] bg-[#ffffff] px-3 py-2 font-mono text-xs text-[#111113] outline-none transition-colors focus:border-[#111113]"
               />
             </div>
 
@@ -246,15 +246,15 @@ export function SimulateLeadDrawer({
                 htmlFor="sim-msg"
                 className="block text-xs font-medium text-[#52525b]"
               >
-                Inbound Inquiry
+                Message
               </label>
               <textarea
                 id="sim-msg"
-                rows={4}
+                rows={5}
                 required
                 value={form.message}
                 onChange={(e) => updateField("message", e.target.value)}
-                className="mt-1 w-full resize-y rounded-md border border-[#e8e8ec] bg-[#ffffff] px-3 py-2 text-sm leading-relaxed text-[#111113] outline-none focus:border-[#111113]"
+                className="mt-1.5 w-full resize-y rounded-md border border-[#e4e4e7] bg-[#ffffff] px-3 py-2 text-sm leading-relaxed text-[#111113] outline-none transition-colors focus:border-[#111113]"
               />
             </div>
           </div>
@@ -266,28 +266,23 @@ export function SimulateLeadDrawer({
             </div>
           )}
 
-          <div className="mt-auto pt-5">
+          <div className="mt-auto flex items-center justify-end gap-2 border-t border-[#ececef] pt-4">
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={onClose}
+              className="cursor-pointer rounded-md border border-[#e4e4e7] bg-[#ffffff] px-3.5 py-2 text-xs font-medium text-[#52525b] hover:text-[#111113] disabled:opacity-50"
+            >
+              Cancel
+            </button>
             <button
               type="submit"
               disabled={submitting}
-              className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-md bg-[#111113] px-4 py-2.5 text-xs font-medium text-[#ffffff] transition-colors hover:bg-[#27272a] disabled:opacity-60"
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-md bg-[#111113] px-4 py-2 text-xs font-medium text-[#ffffff] transition-colors hover:bg-[#27272a] disabled:opacity-60"
             >
-              {submitting ? (
-                <>
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  <span>Enriching domain &amp; evaluating on Gemini…</span>
-                </>
-              ) : (
-                <>
-                  <Send className="h-3.5 w-3.5" />
-                  <span>Run Triage Pipeline</span>
-                </>
-              )}
+              {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              <span>{submitting ? "Running triage..." : "Submit lead"}</span>
             </button>
-            <p className="mt-2.5 text-center text-[11px] text-[#71717a]">
-              Runs live Jina enrichment, Gemini Flash fallback chain, Supabase
-              persistence &amp; Langfuse OTLP tracing.
-            </p>
           </div>
         </form>
       </div>

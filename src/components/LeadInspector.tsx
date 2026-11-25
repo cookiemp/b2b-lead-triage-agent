@@ -6,19 +6,20 @@ import {
   Code2,
   Copy,
   ExternalLink,
-  Globe,
   Loader2,
   ShieldAlert,
-  Sparkles,
   X,
 } from "lucide-react";
 import type { LeadWithAuditLogs } from "@/lib/db";
 import type { TriagePipelineResponse } from "@/lib/pipeline";
 import {
   extractDomain,
+  formatActor,
+  formatAuditAction,
   formatRelativeTime,
   formatRouteLabel,
   formatRoutingReason,
+  getInitials,
   getStatusPresentation,
 } from "@/components/status-format";
 
@@ -54,16 +55,16 @@ export function LeadInspector({
     return (
       <div className="flex flex-1 flex-col items-center justify-center bg-[#ffffff] px-6 text-center">
         <p className="text-sm font-medium text-[#111113]">No lead selected</p>
-        <p className="mt-1 max-w-xs text-xs text-[#71717a]">
-          Select an inquiry from the inbox or simulate a live B2B lead to
-          inspect enrichment, Gemini classification, and Langfuse telemetry.
+        <p className="mt-1 max-w-xs text-xs leading-relaxed text-[#71717a]">
+          Choose an inquiry from the list or submit a test lead to inspect its
+          classification and draft reply.
         </p>
         <button
           type="button"
           onClick={onOpenSimulator}
           className="mt-4 cursor-pointer rounded-md bg-[#111113] px-3.5 py-2 text-xs font-medium text-[#ffffff] transition-colors hover:bg-[#27272a]"
         >
-          Simulate Inbound Lead
+          New lead
         </button>
       </div>
     );
@@ -129,8 +130,8 @@ export function LeadInspector({
 
       setFeedback(
         status === "approved"
-          ? "Approved and logged to audit trail."
-          : "Rejected and logged to audit trail.",
+          ? "Lead approved and recorded in activity."
+          : "Lead rejected and recorded in activity.",
       );
       await onLeadUpdated(lead.id);
     } catch {
@@ -165,18 +166,24 @@ export function LeadInspector({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-[#ffffff]">
-      {/* Sticky 48px Inspector Header */}
-      <div className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-[#e8e8ec] px-5">
-        <div className="flex min-w-0 items-center gap-2.5">
+      {/* Top 48px Action Bar */}
+      <div className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-[#ececef] px-6">
+        <div className="flex min-w-0 items-center gap-2 text-xs">
           <span
-            className={`inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-[11px] font-medium ${statusInfo.surfaceClass}`}
-          >
-            <span className={`h-1.5 w-1.5 rounded-full ${statusInfo.dotClass}`} />
-            {statusInfo.label}
-          </span>
-          {routingReason && (
-            <span className="hidden truncate text-xs text-[#71717a] sm:inline">
-              {formatRoutingReason(routingReason)}
+            className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusInfo.dotClass}`}
+          />
+          <span className="font-medium text-[#111113]">{statusInfo.label}</span>
+          {activeRun && !activeRun.deduplicated && activeRun.model_used && (
+            <span className="hidden text-[#71717a] sm:inline">
+              via{" "}
+              <span className="font-mono text-[11px] text-[#52525b]">
+                {activeRun.model_used}
+              </span>
+            </span>
+          )}
+          {activeRun?.deduplicated && (
+            <span className="hidden text-[#71717a] sm:inline">
+              (deduplicated)
             </span>
           )}
         </div>
@@ -186,14 +193,14 @@ export function LeadInspector({
             <button
               type="button"
               onClick={() => void copyValue(lead.langfuse_trace_id!, "trace")}
-              className="hidden cursor-pointer items-center gap-1.5 rounded border border-[#e8e8ec] px-2 py-1 font-mono text-[11px] text-[#52525b] transition-colors hover:border-[#d4d4dc] hover:text-[#111113] md:inline-flex"
-              title="Copy Langfuse OTLP trace ID"
+              className="hidden cursor-pointer items-center gap-1.5 rounded px-2 py-1 font-mono text-[11px] text-[#71717a] transition-colors hover:bg-[#f4f4f6] hover:text-[#111113] md:inline-flex"
+              title="Copy Langfuse trace ID"
             >
               <span>{lead.langfuse_trace_id.slice(0, 8)}</span>
               {copiedTrace ? (
-                <Check className="h-3 w-3 text-[#059669]" />
+                <Check className="h-3 w-3 text-[#16a34a]" />
               ) : (
-                <Copy className="h-3 w-3 text-[#71717a]" />
+                <Copy className="h-3 w-3" />
               )}
             </button>
           )}
@@ -201,24 +208,24 @@ export function LeadInspector({
           <button
             type="button"
             onClick={() => setShowJson((v) => !v)}
-            className={`inline-flex cursor-pointer items-center gap-1 rounded border px-2 py-1 text-[11px] font-medium transition-colors ${
+            className={`inline-flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
               showJson
-                ? "border-[#111113] bg-[#111113] text-[#ffffff]"
-                : "border-[#e8e8ec] text-[#52525b] hover:border-[#d4d4dc] hover:text-[#111113]"
+                ? "bg-[#f4f4f6] text-[#111113]"
+                : "text-[#71717a] hover:bg-[#f4f4f6] hover:text-[#111113]"
             }`}
           >
-            <Code2 className="h-3 w-3" />
+            <Code2 className="h-3.5 w-3.5" />
             <span>JSON</span>
           </button>
 
           {isReviewable && (
             <>
-              <div className="mx-0.5 h-4 w-px bg-[#e8e8ec]" />
+              <div className="mx-1 h-4 w-px bg-[#ececef]" />
               <button
                 type="button"
                 disabled={acting !== null}
                 onClick={() => void handleDecision("rejected")}
-                className="inline-flex cursor-pointer items-center gap-1 rounded border border-[#e8e8ec] px-2.5 py-1 text-xs font-medium text-[#b91c1c] transition-colors hover:border-[#dc2626]/40 hover:bg-[#fef2f2] disabled:opacity-50"
+                className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-[#e4e4e7] bg-[#ffffff] px-2.5 py-1 text-xs font-medium text-[#52525b] transition-colors hover:border-[#d4d4d8] hover:text-[#111113] disabled:opacity-50"
               >
                 {acting === "rejected" ? (
                   <Loader2 className="h-3 w-3 animate-spin" />
@@ -231,7 +238,7 @@ export function LeadInspector({
                 type="button"
                 disabled={acting !== null}
                 onClick={() => void handleDecision("approved")}
-                className="inline-flex cursor-pointer items-center gap-1 rounded bg-[#111113] px-2.5 py-1 text-xs font-medium text-[#ffffff] transition-colors hover:bg-[#27272a] disabled:opacity-50"
+                className="inline-flex cursor-pointer items-center gap-1 rounded-md bg-[#111113] px-3 py-1 text-xs font-medium text-[#ffffff] transition-colors hover:bg-[#27272a] disabled:opacity-50"
               >
                 {acting === "approved" ? (
                   <Loader2 className="h-3 w-3 animate-spin" />
@@ -245,178 +252,138 @@ export function LeadInspector({
         </div>
       </div>
 
-      {/* Scrollable Inspector Body: Main Thread + Right Properties Rail */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto xl:grid-cols-[minmax(0,1fr)_280px]">
-        {/* Main Thread */}
-        <div className="min-w-0 px-6 py-6">
-          {/* Fresh live-run notice */}
-          {activeRun && (
-            <div className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#e8e8ec] bg-[#f8f8f9] px-3.5 py-2 text-xs text-[#52525b]">
-              <span className="inline-flex items-center gap-1.5">
-                <Sparkles className="h-3.5 w-3.5 text-[#111113]" />
-                {activeRun.deduplicated ? (
-                  <span>
-                    Returned cached result (10-minute idempotency window hit).
-                  </span>
-                ) : (
-                  <span>
-                    Live pipeline run completed via{" "}
-                    <span className="font-mono font-medium text-[#111113]">
-                      {activeRun.model_used ?? "fallback"}
-                    </span>
-                    {activeRun.fallback_attempts.length > 0 &&
-                      ` (auto-recovered after ${activeRun.fallback_attempts.length} fallback)`}
-                    .
-                  </span>
-                )}
-              </span>
-            </div>
-          )}
-
+      {/* Main Content + Right Properties Sidebar */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto xl:grid-cols-[minmax(0,1fr)_272px]">
+        <div className="min-w-0 px-6 py-7 sm:px-8">
           {errorMessage && (
-            <div className="mb-4 rounded-md border border-[#dc2626]/20 bg-[#fef2f2] px-3.5 py-2.5 text-xs text-[#b91c1c]">
+            <div className="mb-5 rounded-md border border-[#dc2626]/20 bg-[#fef2f2] px-3.5 py-2.5 text-xs text-[#b91c1c]">
               {errorMessage}
             </div>
           )}
 
           {feedback && (
-            <div className="mb-4 rounded-md border border-[#059669]/20 bg-[#ecfdf5] px-3.5 py-2.5 text-xs text-[#047857]">
+            <div className="mb-5 rounded-md border border-[#16a34a]/20 bg-[#f0fdf4] px-3.5 py-2.5 text-xs text-[#15803d]">
               {feedback}
             </div>
           )}
 
-          {/* Subject / Lead Header */}
-          <div>
-            <h2 className="text-lg font-semibold tracking-tight text-[#111113]">
-              {triage?.intent ?? "Manual Review Required (Degraded Triage)"}
-            </h2>
-            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[#52525b]">
-              <span className="font-medium text-[#111113]">{lead.name}</span>
-              <span className="text-[#71717a]">&lt;{lead.email}&gt;</span>
-              <span className="text-[#d4d4dc]">·</span>
-              <a
-                href={lead.company_url}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 font-mono text-[11px] text-[#52525b] hover:text-[#111113] hover:underline"
-              >
-                {extractDomain(lead.company_url)}
-                <ExternalLink className="h-3 w-3" />
-              </a>
-              <span className="text-[#d4d4dc]">·</span>
-              <span className="text-[#71717a]">
-                {formatRelativeTime(lead.created_at)} ago
-              </span>
+          {/* Subject & Sender Row */}
+          <h2 className="text-[18px] font-semibold tracking-[-0.015em] text-[#111113]">
+            {triage?.intent ?? "Manual review required"}
+          </h2>
+
+          <div className="mt-3 flex items-center gap-3">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#e4e4e7] bg-[#f4f4f6] text-[11px] font-medium text-[#52525b]">
+              {getInitials(lead.name)}
+            </div>
+            <div className="min-w-0 text-xs">
+              <div className="flex flex-wrap items-center gap-x-1.5">
+                <span className="font-medium text-[#111113]">{lead.name}</span>
+                <span className="text-[#71717a]">{lead.email}</span>
+              </div>
+              <div className="mt-0.5 flex items-center gap-2 text-[11px] text-[#71717a]">
+                <a
+                  href={lead.company_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 hover:text-[#111113] hover:underline"
+                >
+                  {extractDomain(lead.company_url)}
+                  <ExternalLink className="h-2.5 w-2.5" />
+                </a>
+                <span>·</span>
+                <span>{formatRelativeTime(lead.created_at)}</span>
+              </div>
             </div>
           </div>
 
-          {/* Security / Degraded Alert */}
+          {/* Security / Degraded Notice */}
           {(lead.prompt_injection_detected || triage === null) && (
-            <div className="mt-5 flex items-start gap-2.5 rounded-md border border-[#dc2626]/20 bg-[#fef2f2] px-3.5 py-2.5 text-xs text-[#b91c1c]">
+            <div className="mt-6 flex items-start gap-2.5 rounded-md border border-[#dc2626]/20 bg-[#fef2f2]/70 px-3.5 py-2.5 text-xs leading-relaxed text-[#991b1b]">
               <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
-              <div>
-                {lead.prompt_injection_detected ? (
-                  <span>
-                    <strong className="font-semibold">
-                      Prompt-injection tripwire triggered.
-                    </strong>{" "}
-                    Deterministic router overrode LLM confidence and locked this
-                    lead in Human Review.
-                  </span>
-                ) : (
-                  <span>
-                    <strong className="font-semibold">
-                      Upstream LLM unavailable.
-                    </strong>{" "}
-                    Lead was persisted safely instead of dropping with HTTP 502.
-                  </span>
-                )}
-              </div>
+              <span>
+                {lead.prompt_injection_detected
+                  ? "Prompt-injection patterns were detected in this submission. Routing was locked to manual review regardless of model confidence."
+                  : "The model was unavailable when this inquiry arrived. The lead was saved directly to review so nothing was dropped."}
+              </span>
             </div>
           )}
 
-          {/* Inbound Message */}
-          <div className="mt-6">
-            <div className="text-[11px] font-medium tracking-wide text-[#71717a] uppercase">
-              Inbound Inquiry
-            </div>
-            <div className="mt-2 rounded-md border border-[#e8e8ec] bg-[#f8f8f9] px-4 py-3.5 text-sm leading-relaxed text-[#111113] whitespace-pre-wrap">
-              {lead.message}
-            </div>
+          {/* Inbound Message (Clean prose, whitespace over boxes) */}
+          <div className="mt-6 max-w-[65ch] text-[14px] leading-[1.65] text-[#18181b] whitespace-pre-wrap">
+            {lead.message}
           </div>
 
-          {/* Grounded AI Reasoning */}
-          {triage && (
-            <div className="mt-6">
-              <div className="text-[11px] font-medium tracking-wide text-[#71717a] uppercase">
-                Triage Assessment
+          {/* Grounded Summary */}
+          {(triage || routingReason) && (
+            <div className="mt-7 border-t border-[#ececef] pt-6">
+              <div className="text-xs font-medium text-[#71717a]">
+                Assessment
               </div>
-              <p className="mt-2 max-w-[65ch] text-sm leading-relaxed text-[#52525b]">
-                {triage.reasoning}
-              </p>
+              {triage && (
+                <p className="mt-2 max-w-[65ch] text-[13px] leading-relaxed text-[#52525b]">
+                  {triage.reasoning}
+                </p>
+              )}
+              {routingReason && (
+                <p className="mt-1.5 text-xs text-[#71717a]">
+                  {formatRoutingReason(routingReason)}
+                </p>
+              )}
             </div>
           )}
 
           {/* Reply Composer */}
-          <div className="mt-6">
+          <div className="mt-7 border-t border-[#ececef] pt-6">
             <div className="flex items-center justify-between">
               <label
                 htmlFor="reply-composer"
-                className="text-[11px] font-medium tracking-wide text-[#71717a] uppercase"
+                className="text-xs font-medium text-[#71717a]"
               >
-                Draft Reply {isReviewable && "· Editable"}
+                Reply to {lead.name}
               </label>
               {draftEdit.trim().length > 0 && (
                 <button
                   type="button"
                   onClick={() => void copyValue(draftEdit, "reply")}
-                  className="inline-flex cursor-pointer items-center gap-1 text-xs text-[#52525b] hover:text-[#111113]"
+                  className="inline-flex cursor-pointer items-center gap-1 text-xs text-[#71717a] transition-colors hover:text-[#111113]"
                 >
                   {copiedReply ? (
                     <>
-                      <Check className="h-3 w-3 text-[#059669]" />
+                      <Check className="h-3 w-3 text-[#16a34a]" />
                       <span>Copied</span>
                     </>
                   ) : (
                     <>
                       <Copy className="h-3 w-3" />
-                      <span>Copy draft</span>
+                      <span>Copy</span>
                     </>
                   )}
                 </button>
               )}
             </div>
 
-            <div className="mt-2 overflow-hidden rounded-md border border-[#e8e8ec] bg-[#ffffff] focus-within:border-[#111113]">
-              <div className="flex items-center justify-between border-b border-[#e8e8ec] bg-[#f8f8f9] px-3.5 py-2 text-xs text-[#71717a]">
-                <span>
-                  To:{" "}
-                  <span className="font-mono text-[#111113]">{lead.email}</span>
-                </span>
-                <span className="text-[11px]">
-                  {isReviewable ? "Pending operator approval" : statusInfo.label}
-                </span>
-              </div>
+            <div className="mt-2.5 overflow-hidden rounded-lg border border-[#e4e4e7] bg-[#ffffff] transition-colors focus-within:border-[#a1a1aa]">
               <textarea
                 id="reply-composer"
                 rows={4}
                 value={draftEdit}
                 onChange={(e) => setDraftEdit(e.target.value)}
                 disabled={!isReviewable}
-                placeholder="Write a tailored response before approving..."
-                className="w-full resize-y px-3.5 py-3 text-sm leading-relaxed text-[#111113] outline-none disabled:bg-[#f8f8f9]/50 disabled:text-[#52525b]"
+                placeholder="Write a reply before approving..."
+                className="w-full resize-y px-3.5 py-3 text-[13px] leading-relaxed text-[#111113] outline-none disabled:bg-[#fafafa] disabled:text-[#52525b]"
               />
               {isReviewable && (
-                <div className="flex items-center justify-between border-t border-[#e8e8ec] bg-[#f8f8f9] px-3.5 py-2">
+                <div className="flex items-center justify-between border-t border-[#ececef] bg-[#fafafa] px-3.5 py-2">
                   <span className="text-[11px] text-[#71717a]">
-                    Edits are saved to Supabase &amp; recorded in audit logs.
+                    To {lead.email}
                   </span>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
                       disabled={acting !== null}
                       onClick={() => void handleDecision("rejected")}
-                      className="cursor-pointer rounded border border-[#d4d4dc] bg-[#ffffff] px-2.5 py-1 text-xs font-medium text-[#b91c1c] hover:bg-[#fef2f2] disabled:opacity-50"
+                      className="cursor-pointer rounded-md border border-[#e4e4e7] bg-[#ffffff] px-2.5 py-1 text-xs font-medium text-[#52525b] hover:text-[#111113] disabled:opacity-50"
                     >
                       Reject
                     </button>
@@ -424,9 +391,9 @@ export function LeadInspector({
                       type="button"
                       disabled={acting !== null}
                       onClick={() => void handleDecision("approved")}
-                      className="cursor-pointer rounded bg-[#111113] px-3 py-1 text-xs font-medium text-[#ffffff] hover:bg-[#27272a] disabled:opacity-50"
+                      className="cursor-pointer rounded-md bg-[#111113] px-3 py-1 text-xs font-medium text-[#ffffff] hover:bg-[#27272a] disabled:opacity-50"
                     >
-                      Approve &amp; Finalize
+                      Approve
                     </button>
                   </div>
                 </div>
@@ -434,26 +401,24 @@ export function LeadInspector({
             </div>
           </div>
 
-          {/* Collapsible Raw JSON */}
+          {/* Raw JSON Drawer */}
           {showJson && (
-            <div className="mt-6">
-              <div className="text-[11px] font-medium tracking-wide text-[#71717a] uppercase">
-                Raw API Payload
+            <div className="mt-7 border-t border-[#ececef] pt-6">
+              <div className="text-xs font-medium text-[#71717a]">
+                Raw payload
               </div>
-              <pre className="mt-2 max-h-80 overflow-auto rounded-md bg-[#111113] p-4 font-mono text-[11px] leading-relaxed text-[#f4f4f6]">
+              <pre className="mt-2 max-h-80 overflow-auto rounded-md border border-[#ececef] bg-[#fafafa] p-4 font-mono text-[11px] leading-relaxed text-[#18181b]">
                 {JSON.stringify(activeRun ?? lead, null, 2)}
               </pre>
             </div>
           )}
         </div>
 
-        {/* Right Properties & Audit Rail */}
-        <aside className="border-t border-[#e8e8ec] bg-[#f8f8f9]/60 px-5 py-6 xl:border-t-0 xl:border-l">
-          <div className="text-[11px] font-medium tracking-wide text-[#71717a] uppercase">
-            Properties
-          </div>
+        {/* Right Details & Activity Rail */}
+        <aside className="border-t border-[#ececef] bg-[#fafafa]/70 px-5 py-7 xl:border-t-0 xl:border-l">
+          <div className="text-xs font-medium text-[#71717a]">Details</div>
 
-          <dl className="mt-3 space-y-3 text-xs">
+          <dl className="mt-3.5 space-y-3 text-xs">
             <div className="flex items-center justify-between gap-2">
               <dt className="text-[#71717a]">Route</dt>
               <dd className="font-medium text-[#111113]">
@@ -464,32 +429,34 @@ export function LeadInspector({
             <div>
               <div className="flex items-center justify-between gap-2">
                 <dt className="text-[#71717a]">Confidence</dt>
-                <dd className="font-mono font-medium tabular-nums text-[#111113]">
+                <dd className="font-mono text-[11px] font-medium tabular-nums text-[#111113]">
                   {lead.confidence_score !== null
-                    ? `${lead.confidence_score.toFixed(2)} / 1.00`
+                    ? lead.confidence_score.toFixed(2)
                     : "—"}
                 </dd>
               </div>
               {confidencePct !== null && (
-                <div className="relative mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-[#e8e8ec]">
+                <div className="relative mt-1.5 h-[3px] w-full bg-[#e4e4e7]">
                   <div
-                    className={`h-full rounded-full ${
-                      confidencePct >= 80 ? "bg-[#059669]" : "bg-[#d97706]"
+                    className={`h-full ${
+                      confidencePct >= 80 ? "bg-[#111113]" : "bg-[#d97706]"
                     }`}
-                    style={{ width: `${Math.min(100, Math.max(0, confidencePct))}%` }}
+                    style={{
+                      width: `${Math.min(100, Math.max(0, confidencePct))}%`,
+                    }}
                   />
                   <div
-                    className="absolute top-0 bottom-0 w-px bg-[#111113]/40"
+                    className="absolute -top-0.5 -bottom-0.5 w-px bg-[#a1a1aa]"
                     style={{ left: "80%" }}
-                    title="0.80 Auto-Route Gate"
+                    title="0.80 threshold"
                   />
                 </div>
               )}
             </div>
 
             <div className="flex items-center justify-between gap-2">
-              <dt className="text-[#71717a]">ICP Score</dt>
-              <dd className="font-mono font-medium tabular-nums text-[#111113]">
+              <dt className="text-[#71717a]">ICP fit</dt>
+              <dd className="font-mono text-[11px] font-medium tabular-nums text-[#111113]">
                 {lead.icp_score !== null ? `${lead.icp_score} / 100` : "—"}
               </dd>
             </div>
@@ -502,7 +469,7 @@ export function LeadInspector({
             </div>
 
             <div className="flex items-center justify-between gap-2">
-              <dt className="text-[#71717a]">Company Size</dt>
+              <dt className="text-[#71717a]">Company size</dt>
               <dd className="text-[#111113]">
                 {triage?.company_size_estimate ?? "Unknown"}
               </dd>
@@ -510,59 +477,52 @@ export function LeadInspector({
 
             <div className="flex items-center justify-between gap-2">
               <dt className="text-[#71717a]">Source</dt>
-              <dd className="font-mono text-[11px] text-[#52525b]">
-                {lead.source}
-              </dd>
+              <dd className="text-[#52525b]">{lead.source.replace("_", " ")}</dd>
             </div>
 
             {modelUsed && (
               <div className="flex items-center justify-between gap-2">
                 <dt className="text-[#71717a]">Model</dt>
-                <dd className="font-mono text-[11px] text-[#111113]">
+                <dd className="font-mono text-[11px] text-[#52525b]">
                   {modelUsed}
                 </dd>
               </div>
             )}
           </dl>
 
-          {/* Enriched Company Brief */}
-          <div className="mt-6 border-t border-[#e8e8ec] pt-5">
-            <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 text-[11px] font-medium tracking-wide text-[#71717a] uppercase">
-                <Globe className="h-3 w-3" />
-                Enrichment
-              </span>
-              <span className="text-[11px] text-[#52525b]">
-                {lead.enrichment_ok ? "Verified" : "Fallback"}
+          {/* Company Context */}
+          <div className="mt-6 border-t border-[#ececef] pt-5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-medium text-[#71717a]">Company context</span>
+              <span className="text-[11px] text-[#71717a]">
+                {lead.enrichment_ok ? "Fetched" : "Unavailable"}
               </span>
             </div>
             <p className="mt-2 line-clamp-5 text-xs leading-relaxed text-[#52525b]">
               {lead.enriched_summary ??
-                "Site timed out or returned an error within the 5.5s Jina Reader budget."}
+                "Company website timed out or returned an error."}
             </p>
           </div>
 
-          {/* Audit Timeline */}
-          <div className="mt-6 border-t border-[#e8e8ec] pt-5">
-            <div className="text-[11px] font-medium tracking-wide text-[#71717a] uppercase">
-              Audit Trail
-            </div>
+          {/* Activity Timeline */}
+          <div className="mt-6 border-t border-[#ececef] pt-5">
+            <div className="text-xs font-medium text-[#71717a]">Activity</div>
             {lead.audit_logs.length === 0 ? (
-              <p className="mt-2 text-xs text-[#71717a]">No entries yet.</p>
+              <p className="mt-2 text-xs text-[#71717a]">No activity yet.</p>
             ) : (
-              <ol className="mt-3 space-y-2.5">
+              <ol className="mt-3 space-y-3">
                 {lead.audit_logs.map((entry) => (
                   <li key={entry.id} className="text-xs">
                     <div className="flex items-baseline justify-between gap-2">
-                      <span className="font-mono text-[11px] font-medium text-[#111113]">
-                        {entry.action}
+                      <span className="font-medium text-[#111113]">
+                        {formatAuditAction(entry.action)}
                       </span>
-                      <span className="font-mono text-[10px] text-[#71717a]">
+                      <span className="text-[11px] text-[#71717a]">
                         {formatRelativeTime(entry.created_at)}
                       </span>
                     </div>
                     <div className="mt-0.5 text-[11px] text-[#71717a]">
-                      by {entry.actor}
+                      {formatActor(entry.actor)}
                     </div>
                   </li>
                 ))}

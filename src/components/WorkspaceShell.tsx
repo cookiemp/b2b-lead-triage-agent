@@ -20,26 +20,20 @@ import { SimulateLeadDrawer } from "@/components/SimulateLeadDrawer";
 import {
   extractDomain,
   formatRelativeTime,
-  formatRouteLabel,
   getStatusPresentation,
 } from "@/components/status-format";
 
 type NavView = "all" | LeadStatus;
 
-interface NavItem {
-  readonly id: NavView;
-  readonly label: string;
-  readonly dotClass?: string;
-}
-
-const NAV_ITEMS: readonly NavItem[] = [
-  { id: "all", label: "All Leads" },
-  { id: "needs_human_review", label: "Needs Review", dotClass: "bg-[#d97706]" },
-  { id: "auto_routed", label: "Auto-Routed", dotClass: "bg-[#059669]" },
-  { id: "approved", label: "Approved", dotClass: "bg-[#059669]" },
-  { id: "auto_rejected", label: "Auto-Rejected", dotClass: "bg-[#dc2626]" },
-  { id: "rejected", label: "Rejected", dotClass: "bg-[#71717a]" },
-];
+const NAV_ITEMS: ReadonlyArray<{ readonly id: NavView; readonly label: string }> =
+  [
+    { id: "all", label: "All leads" },
+    { id: "needs_human_review", label: "Needs review" },
+    { id: "auto_routed", label: "Auto-routed" },
+    { id: "approved", label: "Approved" },
+    { id: "auto_rejected", label: "Auto-rejected" },
+    { id: "rejected", label: "Rejected" },
+  ];
 
 export function WorkspaceShell() {
   const [leads, setLeads] = useState<readonly LeadWithAuditLogs[]>([]);
@@ -123,6 +117,46 @@ export function WorkspaceShell() {
   const selectedLead =
     filteredLeads.find((l) => l.id === selectedId) ?? filteredLeads[0] ?? null;
 
+  // Keyboard navigation: J / K to step through leads, N to open new lead drawer
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (simulatorOpen) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (e.key === "n" || e.key === "N") {
+        e.preventDefault();
+        setSimulatorOpen(true);
+        return;
+      }
+
+      if (filteredLeads.length === 0) return;
+      const currentIdx = filteredLeads.findIndex(
+        (l) => l.id === selectedLead?.id,
+      );
+
+      if (e.key === "j" || e.key === "ArrowDown") {
+        e.preventDefault();
+        const nextIdx = Math.min(filteredLeads.length - 1, currentIdx + 1);
+        setSelectedId(filteredLeads[nextIdx]?.id ?? null);
+      } else if (e.key === "k" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const prevIdx = Math.max(0, currentIdx - 1);
+        setSelectedId(filteredLeads[prevIdx]?.id ?? null);
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [filteredLeads, selectedLead?.id, simulatorOpen]);
+
   async function handleLeadTriaged(
     result: TriagePipelineResponse,
   ): Promise<void> {
@@ -136,55 +170,50 @@ export function WorkspaceShell() {
     await loadLeads(leadId);
   }
 
-  function renderNavIcon(id: NavView) {
+  function renderNavIcon(id: NavView, isActive: boolean) {
+    const color = isActive ? "text-[#111113]" : "text-[#71717a]";
     switch (id) {
       case "all":
-        return <Inbox className="h-3.5 w-3.5 text-[#71717a]" />;
+        return <Inbox className={`h-3.5 w-3.5 ${color}`} />;
       case "needs_human_review":
-        return <Clock className="h-3.5 w-3.5 text-[#d97706]" />;
+        return <Clock className={`h-3.5 w-3.5 ${color}`} />;
       case "auto_routed":
       case "approved":
-        return <CheckCircle2 className="h-3.5 w-3.5 text-[#059669]" />;
+        return <CheckCircle2 className={`h-3.5 w-3.5 ${color}`} />;
       case "auto_rejected":
-        return <ShieldBan className="h-3.5 w-3.5 text-[#dc2626]" />;
+        return <ShieldBan className={`h-3.5 w-3.5 ${color}`} />;
       case "rejected":
-        return <XCircle className="h-3.5 w-3.5 text-[#71717a]" />;
+        return <XCircle className={`h-3.5 w-3.5 ${color}`} />;
     }
   }
 
   const activeNavLabel =
-    NAV_ITEMS.find((item) => item.id === activeView)?.label ?? "All Leads";
+    NAV_ITEMS.find((item) => item.id === activeView)?.label ?? "All leads";
 
   return (
     <div className="flex min-h-screen flex-col bg-[#ffffff] lg:h-screen lg:flex-row lg:overflow-hidden">
-      {/* Pane 1: Slim Left Navigation Rail */}
-      <aside className="flex shrink-0 flex-col border-b border-[#e8e8ec] bg-[#f8f8f9] lg:w-[224px] lg:border-r lg:border-b-0">
-        <div className="flex h-12 items-center justify-between border-b border-[#e8e8ec] px-4">
-          <div className="flex items-center gap-2">
-            <div className="flex h-5 w-5 items-center justify-center rounded bg-[#111113] font-mono text-[10px] font-semibold text-[#ffffff]">
-              LT
-            </div>
-            <span className="text-sm font-semibold tracking-tight text-[#111113]">
-              Lead Triage
-            </span>
-          </div>
-          <span className="font-mono text-[10px] text-[#71717a]">B2B Ops</span>
+      {/* Pane 1: Monochrome Navigation Rail */}
+      <aside className="flex shrink-0 flex-col border-b border-[#ececef] bg-[#fafafa] lg:w-[216px] lg:border-r lg:border-b-0">
+        <div className="flex h-12 items-center justify-between border-b border-[#ececef] px-4">
+          <span className="text-[13px] font-semibold tracking-[-0.01em] text-[#111113]">
+            Lead Triage
+          </span>
         </div>
 
         <div className="p-3">
           <button
             type="button"
             onClick={() => setSimulatorOpen(true)}
-            className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-md bg-[#111113] px-3 py-2 text-xs font-medium text-[#ffffff] transition-colors hover:bg-[#27272a]"
+            className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-md bg-[#111113] px-3 py-1.5 text-xs font-medium text-[#ffffff] transition-colors hover:bg-[#27272a]"
           >
             <Plus className="h-3.5 w-3.5" />
-            <span>Simulate Inbound Lead</span>
+            <span>New lead</span>
           </button>
         </div>
 
         <nav
           aria-label="Lead queues"
-          className="flex flex-row gap-1 overflow-x-auto px-2 pb-3 lg:flex-1 lg:flex-col lg:overflow-x-visible"
+          className="flex flex-row gap-0.5 overflow-x-auto px-2 pb-3 lg:flex-1 lg:flex-col lg:overflow-x-visible"
         >
           {NAV_ITEMS.map((item) => {
             const isActive = item.id === activeView;
@@ -194,14 +223,14 @@ export function WorkspaceShell() {
                 key={item.id}
                 type="button"
                 onClick={() => setActiveView(item.id)}
-                className={`flex shrink-0 cursor-pointer items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                className={`flex shrink-0 cursor-pointer items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-xs transition-colors ${
                   isActive
-                    ? "bg-[#eaeaf0] text-[#111113]"
-                    : "text-[#52525b] hover:bg-[#f0f0f4] hover:text-[#111113]"
+                    ? "bg-[#ececf0] font-medium text-[#111113]"
+                    : "text-[#52525b] hover:bg-[#f1f1f4] hover:text-[#111113]"
                 }`}
               >
                 <span className="flex items-center gap-2">
-                  {renderNavIcon(item.id)}
+                  {renderNavIcon(item.id, isActive)}
                   <span>{item.label}</span>
                 </span>
                 <span className="font-mono text-[11px] tabular-nums text-[#71717a]">
@@ -212,19 +241,21 @@ export function WorkspaceShell() {
           })}
         </nav>
 
-        <div className="hidden border-t border-[#e8e8ec] px-4 py-3 text-[11px] text-[#71717a] lg:block">
-          <div className="font-medium text-[#52525b]">Pipeline Guardrails</div>
-          <div className="mt-1 space-y-0.5 font-mono text-[10px]">
-            <div>Gate: conf ≥ 0.80</div>
-            <div>LLM: 3.8 → 3.6 → 3.5-lite</div>
-            <div>Trace: Langfuse OTLP</div>
+        <div className="hidden border-t border-[#ececef] px-4 py-3 text-[11px] text-[#71717a] lg:block">
+          <div className="flex items-center justify-between">
+            <span>Navigate</span>
+            <span className="font-mono text-[10px]">J / K</span>
+          </div>
+          <div className="mt-1 flex items-center justify-between">
+            <span>New lead</span>
+            <span className="font-mono text-[10px]">N</span>
           </div>
         </div>
       </aside>
 
       {/* Pane 2: Center Inbox List */}
-      <section className="flex min-h-[300px] shrink-0 flex-col border-b border-[#e8e8ec] bg-[#ffffff] lg:w-[340px] lg:border-r lg:border-b-0 xl:w-[368px]">
-        <div className="flex h-12 shrink-0 items-center justify-between border-b border-[#e8e8ec] px-4">
+      <section className="flex min-h-[300px] shrink-0 flex-col border-b border-[#ececef] bg-[#ffffff] lg:w-[336px] lg:border-r lg:border-b-0 xl:w-[360px]">
+        <div className="flex h-12 shrink-0 items-center justify-between border-b border-[#ececef] px-4">
           <div className="flex items-center gap-2">
             <h1 className="text-xs font-semibold text-[#111113]">
               {activeNavLabel}
@@ -238,22 +269,22 @@ export function WorkspaceShell() {
             onClick={() => void loadLeads()}
             disabled={loading}
             className="cursor-pointer rounded p-1.5 text-[#71717a] transition-colors hover:bg-[#f4f4f6] hover:text-[#111113] disabled:opacity-50"
-            title="Refresh leads from Supabase"
+            title="Refresh"
             aria-label="Refresh leads"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
         </div>
 
-        <div className="border-b border-[#e8e8ec] px-3 py-2">
+        <div className="border-b border-[#ececef] px-3 py-2">
           <div className="relative">
-            <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-[#71717a]" />
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-[#a1a1aa]" />
             <input
               type="search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Filter name, email, domain…"
-              className="w-full rounded-md bg-[#f4f4f6] py-1.5 pr-3 pl-8 text-xs text-[#111113] placeholder:text-[#71717a] outline-none focus:ring-1 focus:ring-[#111113]"
+              placeholder="Search leads..."
+              className="w-full rounded-md bg-[#f4f4f6] py-1.5 pr-3 pl-8 text-xs text-[#111113] placeholder:text-[#a1a1aa] outline-none focus:ring-1 focus:ring-[#a1a1aa]"
             />
           </div>
         </div>
@@ -264,20 +295,19 @@ export function WorkspaceShell() {
           </div>
         )}
 
-        <div className="min-h-0 flex-1 overflow-y-auto divide-y divide-[#e8e8ec]">
+        <div className="min-h-0 flex-1 divide-y divide-[#f1f1f4] overflow-y-auto">
           {loading && leads.length === 0 ? (
             <div className="flex items-center justify-center py-12 text-xs text-[#71717a]">
               <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-              Loading leads…
+              Loading leads...
             </div>
           ) : filteredLeads.length === 0 ? (
             <div className="px-5 py-12 text-center">
               <p className="text-xs font-medium text-[#111113]">
-                No leads in {activeNavLabel}
+                No leads in {activeNavLabel.toLowerCase()}
               </p>
               <p className="mt-1 text-[11px] text-[#71717a]">
-                Use &ldquo;Simulate Inbound Lead&rdquo; to run a live test
-                preset.
+                Press N or click New lead to submit a test inquiry.
               </p>
             </div>
           ) : (
@@ -289,49 +319,44 @@ export function WorkspaceShell() {
                   key={lead.id}
                   type="button"
                   onClick={() => setSelectedId(lead.id)}
-                  className={`block w-full cursor-pointer px-4 py-3 text-left transition-colors ${
+                  className={`relative block w-full cursor-pointer px-4 py-3 text-left transition-colors ${
                     isSelected
-                      ? "bg-[#f4f4f6]"
-                      : "bg-[#ffffff] hover:bg-[#f8f8f9]"
+                      ? "bg-[#f5f5f7]"
+                      : "bg-[#ffffff] hover:bg-[#fafafa]"
                   }`}
                 >
+                  {isSelected && (
+                    <span className="absolute top-0 bottom-0 left-0 w-[2px] bg-[#111113]" />
+                  )}
+
                   <div className="flex items-baseline justify-between gap-2">
-                    <span className="truncate text-[13px] font-semibold text-[#111113]">
+                    <span className="truncate text-[13px] font-medium text-[#111113]">
                       {lead.name}
                     </span>
-                    <span className="shrink-0 font-mono text-[10px] text-[#71717a]">
+                    <span className="shrink-0 text-[11px] text-[#a1a1aa]">
                       {formatRelativeTime(lead.created_at)}
                     </span>
                   </div>
 
-                  <div className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-[#71717a]">
-                    <span className="truncate font-mono">
-                      {extractDomain(lead.company_url)}
-                    </span>
-                    <span>·</span>
-                    <span className="truncate">
-                      {formatRouteLabel(lead.triage_json?.suggested_route)}
-                    </span>
-                  </div>
-
-                  <p className="mt-1.5 line-clamp-1 text-xs text-[#52525b]">
+                  <p className="mt-1 line-clamp-1 text-xs text-[#52525b]">
                     {lead.message}
                   </p>
 
-                  <div className="mt-2 flex items-center justify-between text-[11px]">
-                    <span
-                      className={`inline-flex items-center gap-1.5 font-medium ${statusInfo.textClass}`}
-                    >
+                  <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-[#71717a]">
+                    <span className="inline-flex min-w-0 items-center gap-1.5 truncate">
                       <span
-                        className={`h-1.5 w-1.5 rounded-full ${statusInfo.dotClass}`}
+                        className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusInfo.dotClass}`}
                       />
-                      {statusInfo.shortLabel}
+                      <span className="truncate">{statusInfo.shortLabel}</span>
+                      <span className="text-[#d4d4d8]">·</span>
+                      <span className="truncate">
+                        {extractDomain(lead.company_url)}
+                      </span>
                     </span>
-                    <span className="font-mono text-[10px] tabular-nums text-[#71717a]">
+                    <span className="shrink-0 font-mono text-[10px] tabular-nums text-[#71717a]">
                       {lead.confidence_score !== null
-                        ? `${lead.confidence_score.toFixed(2)} conf`
-                        : "degraded"}
-                      {lead.icp_score !== null ? ` · ICP ${lead.icp_score}` : ""}
+                        ? lead.confidence_score.toFixed(2)
+                        : "—"}
                     </span>
                   </div>
                 </button>
@@ -349,7 +374,7 @@ export function WorkspaceShell() {
         onOpenSimulator={() => setSimulatorOpen(true)}
       />
 
-      {/* Slide-over Simulator Drawer */}
+      {/* Slide-over New Lead Drawer */}
       <SimulateLeadDrawer
         open={simulatorOpen}
         onClose={() => setSimulatorOpen(false)}
