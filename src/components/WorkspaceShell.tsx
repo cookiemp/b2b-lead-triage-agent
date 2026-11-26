@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   Clock,
   Inbox,
-  Loader2,
   Plus,
   RefreshCw,
   Search,
@@ -201,6 +200,7 @@ export function WorkspaceShell() {
 
   const activeNavLabel =
     NAV_ITEMS.find((item) => item.id === activeView)?.label ?? "All leads";
+  const isInitialLoading = loading && leads.length === 0;
 
   return (
     <div className="flex min-h-screen flex-col bg-[#ffffff] lg:h-screen lg:flex-row lg:overflow-hidden">
@@ -245,9 +245,16 @@ export function WorkspaceShell() {
                   {renderNavIcon(item.id, isActive)}
                   <span>{item.label}</span>
                 </span>
-                <span className="font-mono text-[11px] tabular-nums text-[#71717a]">
-                  {count}
-                </span>
+                {isInitialLoading ? (
+                  <span
+                    aria-hidden="true"
+                    className="h-3 w-4 animate-pulse rounded bg-[#e4e4e7]"
+                  />
+                ) : (
+                  <span className="font-mono text-[11px] tabular-nums text-[#71717a]">
+                    {count}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -281,9 +288,16 @@ export function WorkspaceShell() {
             <h1 className="text-xs font-semibold text-[#111113]">
               {activeNavLabel}
             </h1>
-            <span className="font-mono text-[11px] text-[#71717a]">
-              {filteredLeads.length}
-            </span>
+            {isInitialLoading ? (
+              <span
+                aria-hidden="true"
+                className="h-3 w-4 animate-pulse rounded bg-[#e4e4e7]"
+              />
+            ) : (
+              <span className="font-mono text-[11px] text-[#71717a]">
+                {filteredLeads.length}
+              </span>
+            )}
           </div>
           <button
             type="button"
@@ -320,10 +334,24 @@ export function WorkspaceShell() {
           ref={listContainerRef}
           className="min-h-0 flex-1 divide-y divide-[#f1f1f4] overflow-y-auto"
         >
-          {loading && leads.length === 0 ? (
-            <div className="flex items-center justify-center py-12 text-xs text-[#71717a]">
-              <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-              Loading leads...
+          {isInitialLoading ? (
+            <div aria-label="Loading leads" className="divide-y divide-[#f1f1f4]">
+              {[0, 1, 2, 3, 4, 5].map((idx) => (
+                <div key={idx} className="px-4 py-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="h-3.5 w-28 animate-pulse rounded bg-[#ececef]" />
+                    <div className="h-2.5 w-10 animate-pulse rounded bg-[#f1f1f4]" />
+                  </div>
+                  <div className="mt-2 h-3 w-full animate-pulse rounded bg-[#f4f4f6]" />
+                  <div className="mt-2.5 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-[#e4e4e7]" />
+                      <div className="h-2.5 w-24 animate-pulse rounded bg-[#f1f1f4]" />
+                    </div>
+                    <div className="h-2.5 w-6 animate-pulse rounded bg-[#f1f1f4]" />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : filteredLeads.length === 0 ? (
             <div className="px-5 py-12 text-center">
@@ -394,6 +422,7 @@ export function WorkspaceShell() {
       {/* Pane 3: Right Lead Inspector */}
       <LeadInspector
         lead={selectedLead}
+        loading={isInitialLoading}
         lastRunMeta={lastRunMeta}
         onLeadUpdated={handleLeadUpdated}
         onOpenSimulator={() => setSimulatorOpen(true)}

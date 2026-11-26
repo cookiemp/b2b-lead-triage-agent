@@ -25,6 +25,7 @@ import {
 
 interface LeadInspectorProps {
   readonly lead: LeadWithAuditLogs | null;
+  readonly loading?: boolean;
   readonly lastRunMeta: TriagePipelineResponse | null;
   readonly onLeadUpdated: (leadId: string) => Promise<void>;
   readonly onOpenSimulator: () => void;
@@ -32,6 +33,7 @@ interface LeadInspectorProps {
 
 export function LeadInspector({
   lead,
+  loading = false,
   lastRunMeta,
   onLeadUpdated,
   onOpenSimulator,
@@ -50,6 +52,88 @@ export function LeadInspector({
     setFeedback(null);
     setShowJson(false);
   }, [lead?.id, lead?.draft_reply]);
+
+  if (loading && lead === null) {
+    return (
+      <div
+        aria-label="Loading lead details"
+        className="flex min-h-0 flex-1 flex-col bg-[#ffffff]"
+      >
+        <div className="flex h-12 shrink-0 items-center justify-between border-b border-[#ececef] px-6">
+          <div className="flex items-center gap-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-[#e4e4e7]" />
+            <div className="h-3 w-24 animate-pulse rounded bg-[#ececef]" />
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="h-5 w-14 animate-pulse rounded bg-[#f4f4f6]" />
+            <div className="h-5 w-12 animate-pulse rounded bg-[#f4f4f6]" />
+          </div>
+        </div>
+
+        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto xl:grid-cols-[minmax(0,1fr)_272px]">
+          <div className="min-w-0 px-6 py-7 sm:px-8">
+            <div className="h-5 w-64 animate-pulse rounded bg-[#ececef]" />
+
+            <div className="mt-4 flex items-center gap-3">
+              <div className="h-8 w-8 shrink-0 animate-pulse rounded-full bg-[#f4f4f6]" />
+              <div className="space-y-1.5">
+                <div className="h-3 w-44 animate-pulse rounded bg-[#ececef]" />
+                <div className="h-2.5 w-28 animate-pulse rounded bg-[#f4f4f6]" />
+              </div>
+            </div>
+
+            <div className="mt-7 max-w-[65ch] space-y-2.5">
+              <div className="h-3.5 w-full animate-pulse rounded bg-[#f4f4f6]" />
+              <div className="h-3.5 w-11/12 animate-pulse rounded bg-[#f4f4f6]" />
+              <div className="h-3.5 w-3/4 animate-pulse rounded bg-[#f4f4f6]" />
+            </div>
+
+            <div className="mt-7 border-t border-[#ececef] pt-6">
+              <div className="h-3 w-20 animate-pulse rounded bg-[#ececef]" />
+              <div className="mt-3 max-w-[65ch] space-y-2">
+                <div className="h-3 w-full animate-pulse rounded bg-[#f4f4f6]" />
+                <div className="h-3 w-5/6 animate-pulse rounded bg-[#f4f4f6]" />
+              </div>
+            </div>
+
+            <div className="mt-7 border-t border-[#ececef] pt-6">
+              <div className="h-3 w-28 animate-pulse rounded bg-[#ececef]" />
+              <div className="mt-2.5 h-28 w-full animate-pulse rounded-lg border border-[#ececef] bg-[#fafafa]" />
+            </div>
+          </div>
+
+          <aside className="border-t border-[#ececef] bg-[#fafafa]/70 px-5 py-7 xl:border-t-0 xl:border-l">
+            <div className="h-3 w-14 animate-pulse rounded bg-[#ececef]" />
+            <div className="mt-4 space-y-3.5">
+              {[0, 1, 2, 3, 4, 5].map((idx) => (
+                <div key={idx} className="flex items-center justify-between">
+                  <div className="h-3 w-20 animate-pulse rounded bg-[#ececef]" />
+                  <div className="h-3 w-16 animate-pulse rounded bg-[#e4e4e7]" />
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-6 border-t border-[#ececef] pt-5">
+              <div className="h-3 w-24 animate-pulse rounded bg-[#ececef]" />
+              <div className="mt-3 space-y-2">
+                <div className="h-2.5 w-full animate-pulse rounded bg-[#ececef]" />
+                <div className="h-2.5 w-11/12 animate-pulse rounded bg-[#ececef]" />
+                <div className="h-2.5 w-3/4 animate-pulse rounded bg-[#ececef]" />
+              </div>
+            </div>
+
+            <div className="mt-6 border-t border-[#ececef] pt-5">
+              <div className="h-3 w-16 animate-pulse rounded bg-[#ececef]" />
+              <div className="mt-3 space-y-3">
+                <div className="h-3 w-32 animate-pulse rounded bg-[#ececef]" />
+                <div className="h-3 w-24 animate-pulse rounded bg-[#ececef]" />
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    );
+  }
 
   if (lead === null) {
     return (
