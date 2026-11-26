@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import type { LeadStore } from "@/lib/db";
-import { LeadDecisionSchema, LeadStatusSchema } from "@/lib/schemas";
+import {
+  LeadDecisionSchema,
+  LeadStatusSchema,
+  type LeadRecord,
+} from "@/lib/schemas";
 import {
   createInMemoryRateLimiter,
   extractClientIp,
@@ -85,8 +89,16 @@ export function createLeadsGetHandler(config: {
 export function createLeadPatchHandler(config: {
   readonly resolveStore: () => LeadStore | null;
   readonly reviewRateLimiter?: RateLimiter;
+  readonly onLeadApproved?: (
+    lead: LeadRecord,
+    store: LeadStore,
+  ) => Promise<LeadRecord | void>;
 }) {
-  const { resolveStore, reviewRateLimiter = defaultReviewRateLimiter } = config;
+  const {
+    resolveStore,
+    reviewRateLimiter = defaultReviewRateLimiter,
+    onLeadApproved,
+  } = config;
 
   return async function handleLeadPatch(
     request: Request,
@@ -172,9 +184,21 @@ export function createLeadPatchHandler(config: {
         );
       }
 
+      let finalLead = result.lead;
+      if (finalLead.status === "approved" && onLeadApproved) {
+        try {
+          const synced = await onLeadApproved(finalLead, store);
+          if (synced) {
+            finalLead = synced;
+          }
+        } catch {
+          // Never fail the approval response if downstream CRM sync throws unexpectedly.
+        }
+      }
+
       return NextResponse.json(
         {
-          lead: result.lead,
+          lead: finalLead,
           audit_log: result.auditLog,
         },
         { status: 200 },

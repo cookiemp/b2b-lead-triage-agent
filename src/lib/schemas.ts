@@ -16,12 +16,19 @@ export const SUGGESTED_ROUTES = [
 ] as const;
 export const URGENCIES = ["low", "medium", "high"] as const;
 export const REVIEW_DECISIONS = ["approved", "rejected"] as const;
+export const HUBSPOT_SYNC_STATUSES = [
+  "pending",
+  "synced",
+  "failed",
+  "skipped",
+] as const;
 
 export const LeadSourceSchema = z.enum(LEAD_SOURCES);
 export const LeadStatusSchema = z.enum(LEAD_STATUSES);
 export const SuggestedRouteSchema = z.enum(SUGGESTED_ROUTES);
 export const UrgencySchema = z.enum(URGENCIES);
 export const ReviewDecisionSchema = z.enum(REVIEW_DECISIONS);
+export const HubSpotSyncStatusSchema = z.enum(HUBSPOT_SYNC_STATUSES);
 
 const BLOCKED_HOSTNAMES = new Set([
   "localhost",
@@ -236,6 +243,9 @@ export const LeadRecordSchema = z.object({
   status: LeadStatusSchema,
   source: LeadSourceSchema,
   langfuse_trace_id: z.string().nullable(),
+  hubspot_contact_id: z.string().nullable().optional(),
+  hubspot_sync_status: HubSpotSyncStatusSchema.nullable().optional(),
+  hubspot_synced_at: z.string().nullable().optional(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -254,6 +264,7 @@ export type LeadStatus = z.infer<typeof LeadStatusSchema>;
 export type SuggestedRoute = z.infer<typeof SuggestedRouteSchema>;
 export type Urgency = z.infer<typeof UrgencySchema>;
 export type ReviewDecision = z.infer<typeof ReviewDecisionSchema>;
+export type HubSpotSyncStatus = z.infer<typeof HubSpotSyncStatusSchema>;
 export type InboundLead = z.infer<typeof InboundLeadSchema>;
 export type InboundLeadInput = z.input<typeof InboundLeadSchema>;
 export type TriageResult = z.infer<typeof TriageResultSchema>;

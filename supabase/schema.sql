@@ -26,6 +26,11 @@ create table if not exists public.leads (
     source in ('web_demo', 'webhook', 'n8n')
   ),
   langfuse_trace_id text,
+  hubspot_contact_id text,
+  hubspot_sync_status text check (
+    hubspot_sync_status is null or hubspot_sync_status in ('pending', 'synced', 'failed', 'skipped')
+  ),
+  hubspot_synced_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

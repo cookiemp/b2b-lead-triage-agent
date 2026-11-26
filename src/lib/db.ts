@@ -5,6 +5,7 @@ import {
   AuditLogRecordSchema,
   LeadRecordSchema,
   type AuditLogRecord,
+  type HubSpotSyncStatus,
   type LeadDecision,
   type LeadRecord,
   type LeadStatus,
@@ -27,6 +28,15 @@ export type ReviewLeadResult =
       readonly currentStatus?: LeadStatus;
     };
 
+export interface HubSpotSyncPersistenceUpdate {
+  readonly status: HubSpotSyncStatus;
+  readonly contactId?: string | null;
+  readonly noteId?: string | null;
+  readonly syncedAt?: string | null;
+  readonly reason?: string;
+  readonly httpStatus?: number;
+}
+
 export interface LeadStore extends LeadRepository {
   countRecentDemoLeads(sinceIso: string): Promise<number>;
   listLeadsWithAudit(options?: {
@@ -34,6 +44,10 @@ export interface LeadStore extends LeadRepository {
     readonly limit?: number;
   }): Promise<readonly LeadWithAuditLogs[]>;
   reviewLead(leadId: string, decision: LeadDecision): Promise<ReviewLeadResult>;
+  recordHubSpotSync?(
+    leadId: string,
+    update: HubSpotSyncPersistenceUpdate,
+  ): Promise<LeadRecord | null>;
 }
 
 function parseLeadRecord(row: unknown): LeadRecord {
@@ -292,11 +306,67 @@ export function createSupabaseLeadStore(config: SupabaseConfig): LeadStore {
     };
   }
 
+  async function recordHubSpotSync(
+    leadId: string,
+    update: HubSpotSyncPersistenceUpdate,
+  ): Promise<LeadRecord | null> {
+    const patch: {
+      hubspot_sync_status: HubSpotSyncStatus;
+      hubspot_contact_id?: string | null;
+      hubspot_synced_at?: string | null;
+    } = {
+      hubspot_sync_status: update.status,
+    };
+    if (update.contactId !== undefined) {
+      patch.hubspot_contact_id = update.contactId;
+    }
+    if (update.syncedAt !== undefined) {
+      patch.hubspot_synced_at = update.syncedAt;
+    }
+
+    const { data, error } = await supabase
+      .from("leads")
+      .update(patch)
+      .eq("id", leadId)
+      .select("*")
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Supabase recordHubSpotSync failed: ${error.message}`);
+    }
+
+    if (!data) {
+      return null;
+    }
+
+    const updatedLead = parseLeadRecord(data);
+
+    if (update.status === "synced" || update.status === "failed") {
+      await supabase.from("audit_logs").insert({
+        lead_id: updatedLead.id,
+        action:
+          update.status === "synced" ? "hubspot_synced" : "hubspot_sync_failed",
+        actor: "hubspot_sync",
+        details_json: {
+          hubspot_contact_id: update.contactId ?? null,
+          hubspot_note_id: update.noteId ?? null,
+          ...(update.reason ? { reason: update.reason } : {}),
+          ...(update.httpStatus !== undefined
+            ? { http_status: update.httpStatus }
+            : {}),
+        },
+      });
+    }
+
+    return updatedLead;
+  }
+
   return {
     findByIdempotencyKey,
     createLeadWithAudit,
     countRecentDemoLeads,
     listLeadsWithAudit,
     reviewLead,
+    recordHubSpotSync,
   };
 }

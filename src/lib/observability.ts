@@ -366,3 +366,138 @@ export function createLangfuseTelemetry(
     },
   };
 }
+
+export interface HubSpotSpanEvent {
+  readonly leadId: string;
+  readonly trigger: "auto_routed" | "human_approved";
+  readonly status: "synced" | "failed" | "skipped";
+  readonly latencyMs: number;
+  readonly contactId?: string | null;
+  readonly noteId?: string | null;
+  readonly reason?: string;
+  readonly httpStatus?: number;
+  readonly parentTraceId?: string | null;
+}
+
+/**
+ * Emits a lightweight OTLP span for HubSpot CRM sync (attached to the existing
+ * lead triage trace when `parentTraceId` is a valid 32-hex OTel trace ID, or as
+ * a standalone trace for HITL approvals). Never logs secrets or access tokens.
+ */
+export async function emitHubSpotSyncSpan(
+  config: LangfuseConfig | null,
+  event: HubSpotSpanEvent,
+  options: LangfuseTelemetryOptions = {},
+): Promise<void> {
+  if (config === null) {
+    return;
+  }
+
+  const fetchFn = options.fetchFn ?? fetch;
+  const timeoutMs = options.timeoutMs ?? OTLP_FLUSH_TIMEOUT_MS;
+  const now = options.now ?? Date.now;
+
+  const endMs = now();
+  const startMs = Math.max(0, endMs - event.latencyMs);
+  const traceId =
+    event.parentTraceId && /^[0-9a-f]{32}$/i.test(event.parentTraceId)
+      ? event.parentTraceId
+      : generateHexId(16);
+  const spanId = generateHexId(8);
+
+  const outputPayload: Record<string, unknown> = {
+    status: event.status,
+    latency_ms: event.latencyMs,
+    contact_id: event.contactId ?? null,
+    note_id: event.noteId ?? null,
+    ...(event.reason ? { reason: event.reason } : {}),
+    ...(event.httpStatus !== undefined ? { http_status: event.httpStatus } : {}),
+  };
+
+  const attributes: OtlpKeyValue[] = [
+    strAttr("langfuse.trace.name", "hubspot_crm_sync"),
+    strArrayAttr("langfuse.trace.tags", [
+      `trigger:${event.trigger}`,
+      `hubspot:${event.status}`,
+    ]),
+    strAttr("langfuse.observation.type", "span"),
+    strAttr(
+      "langfuse.observation.input",
+      JSON.stringify({ lead_id: event.leadId, trigger: event.trigger }),
+    ),
+    strAttr("langfuse.observation.output", JSON.stringify(outputPayload)),
+    intAttr("langfuse.observation.metadata.latency_ms", event.latencyMs),
+    strAttr("langfuse.observation.metadata.status", event.status),
+  ];
+
+  if (event.contactId) {
+    attributes.push(
+      strAttr("langfuse.observation.metadata.contact_id", event.contactId),
+    );
+  }
+
+  const payload = {
+    resourceSpans: [
+      {
+        resource: {
+          attributes: [strAttr("service.name", "b2b-lead-triage-agent")],
+        },
+        scopeSpans: [
+          {
+            scope: {
+              name: "b2b-lead-triage-agent.observability",
+              version: "1.0.0",
+            },
+            spans: [
+              {
+                traceId,
+                spanId,
+                name: "hubspot_crm_sync",
+                kind: 3, // CLIENT
+                startTimeUnixNano: msToUnixNano(startMs),
+                endTimeUnixNano: msToUnixNano(endMs),
+                attributes,
+                status:
+                  event.status === "failed"
+                    ? { code: 2, message: event.reason ?? "hubspot_sync_failed" }
+                    : { code: 1 },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  const endpoint = `${config.baseUrl.replace(/\/$/, "")}/api/public/otel/v1/traces`;
+  const authHeader = `Basic ${Buffer.from(
+    `${config.publicKey}:${config.secretKey}`,
+    "utf8",
+  ).toString("base64")}`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchFn(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: authHeader,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      console.error(
+        `Langfuse HubSpot span flush failed with HTTP ${response.status}`,
+      );
+    }
+  } catch (error: unknown) {
+    console.error(
+      "Langfuse HubSpot span flush error:",
+      error instanceof Error ? error.message : String(error),
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}

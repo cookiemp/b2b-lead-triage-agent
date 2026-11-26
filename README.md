@@ -146,3 +146,16 @@ To run this agent inside an n8n workflow without moving deterministic business l
 > **Alert ownership:** When `RESEND_API_KEY` + `ALERT_EMAIL_TO` (or `ALERT_WEBHOOK_URL` for Slack/Discord) are configured in Vercel, `src/lib/notify.ts` sends non-blocking alerts inside Next.js `after()` (`3.5s` timeout) for `web_demo` and direct `webhook` leads, and skips `source: "n8n"` leads so n8n owns downstream email orchestration without duplicate notifications.
 >
 > **Hosting note:** Verified live on n8n Cloud (14-day free trial). For a permanent \$0/month setup, host n8n on Render's free web service pointed at Supabase Postgres (so restarts never wipe workflows) with a 10-minute UptimeRobot `/healthz` ping.
+
+---
+
+## HubSpot CRM v3 Sync
+
+Qualified leads (`auto_routed`) and manually approved leads (`approved` via `PATCH /api/leads/[id]`) automatically sync to HubSpot CRM v3 when `HUBSPOT_ACCESS_TOKEN` is configured (spam and rejected leads are never synced; when unset, sync is cleanly skipped with a structured warning so CI and offline evals stay green).
+
+1. Create a HubSpot Service Key (or Private App token) with scopes `crm.objects.contacts.read`, `crm.objects.contacts.write`, and `crm.schemas.contacts.write`, and add `HUBSPOT_ACCESS_TOKEN` to `.env.local` and Vercel.
+2. Run the one-time idempotent property setup script to create `icp_score`, `triage_route`, and `ai_enrichment_summary` in `contactinformation`:
+   ```bash
+   npx tsx scripts/setup-hubspot-properties.ts
+   ```
+3. Each sync (`src/lib/hubspot.ts`, 5s timeout, Zod-validated) upserts the contact idempotently by `email` (`POST /crm/v3/objects/contacts/batch/upsert`), attaches an HTML Note (`POST /crm/v3/objects/notes`, association type `202`) containing the ICP score, enrichment summary, and drafted reply, persists `hubspot_contact_id` / `hubspot_sync_status` / `hubspot_synced_at` in Supabase, and logs a `hubspot_crm_sync` OTLP span to Langfuse.

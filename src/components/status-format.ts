@@ -93,6 +93,10 @@ export function formatAuditAction(action: string): string {
       return "Approved";
     case "human_rejected":
       return "Rejected";
+    case "hubspot_synced":
+      return "Synced to HubSpot";
+    case "hubspot_sync_failed":
+      return "HubSpot sync failed";
     default:
       return action.replace(/_/g, " ");
   }
@@ -104,6 +108,8 @@ export function formatActor(actor: string): string {
       return "Triage agent";
     case "human_operator":
       return "Operator";
+    case "hubspot_sync":
+      return "HubSpot CRM";
     default:
       return actor.replace(/_/g, " ");
   }

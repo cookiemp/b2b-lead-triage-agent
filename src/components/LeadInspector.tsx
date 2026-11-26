@@ -572,6 +572,24 @@ export function LeadInspector({
                 </dd>
               </div>
             )}
+
+            {lead.hubspot_sync_status && (
+              <div className="flex items-center justify-between gap-2">
+                <dt className="text-[#71717a]">HubSpot CRM</dt>
+                <dd className="inline-flex items-center gap-1.5 text-[#111113]">
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      lead.hubspot_sync_status === "synced"
+                        ? "bg-[#16a34a]"
+                        : lead.hubspot_sync_status === "failed"
+                          ? "bg-[#dc2626]"
+                          : "bg-[#a1a1aa]"
+                    }`}
+                  />
+                  <span className="capitalize">{lead.hubspot_sync_status}</span>
+                </dd>
+              </div>
+            )}
           </dl>
 
           {/* Company Context */}
